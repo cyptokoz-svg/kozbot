@@ -1,0 +1,21 @@
+# Secrets
+.env
+.env.local
+config.json
+
+# Logs
+*.log
+*.jsonl
+polymarket-bot/*.log
+polymarket-bot/*.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# OS
+.DS_Store
