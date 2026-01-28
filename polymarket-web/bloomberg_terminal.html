@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CLAWDBOT // QUANT TERMINAL</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bb-bg: #000000;
+            --bb-orange: #ff9900;
+            --bb-green: #00ff00;
+            --bb-red: #ff3333;
+            --bb-border: #333;
+        }
+        body {
+            background-color: var(--bb-bg);
+            color: var(--bb-orange);
+            font-family: 'Share Tech Mono', monospace;
+            overflow: hidden;
+        }
+        .bb-box {
+            border: 1px solid var(--bb-border);
+            background: #050505;
+            position: relative;
+        }
+        .bb-header {
+            background: var(--bb-orange);
+            color: black;
+            padding: 2px 8px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            display: inline-block;
+        }
+        .grid-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr 300px;
+            grid-template-rows: 60px 1fr 250px;
+            gap: 4px;
+            height: 100vh;
+            padding: 4px;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #111; }
+        ::-webkit-scrollbar-thumb { background: #444; }
+        
+        .blink { animation: blinker 1s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0; } }
+        
+        .val-up { color: var(--bb-green); }
+        .val-down { color: var(--bb-red); }
+    </style>
+</head>
+<body>
+
+    <div class="grid-layout">
+        <!-- 1. Header / Ticker -->
+        <div class="bb-box col-span-3 flex items-center px-4 justify-between">
+            <div class="text-xl tracking-widest font-bold">
+                <span class="text-white">CLAWD</span><span class="text-[#ff9900]">BOT</span> <span class="text-xs align-top">V3.1</span>
+            </div>
+            <div class="flex gap-8 text-sm">
+                <div>BTC <span class="val-up">89,479.66 ▲</span></div>
+                <div>ETH <span class="val-down">2,240.12 ▼</span></div>
+                <div>GAS <span class="text-white">12 Gwei</span></div>
+            </div>
+            <div class="text-right text-xs text-gray-500">
+                SYSTEM ONLINE <span class="blink">●</span><br>
+                2026-01-28 17:15:00 UTC
+            </div>
+        </div>
+
+        <!-- 2. Sidebar: Stats -->
+        <div class="bb-box flex flex-col p-4 gap-6">
+            <div>
+                <div class="bb-header">NET PNL (24H)</div>
+                <div class="text-4xl mt-2 val-up">+4.07 R</div>
+                <div class="text-xs text-gray-500 mt-1">TARGET: 5.00 R</div>
+            </div>
+            
+            <div>
+                <div class="bb-header">PERFORMANCE</div>
+                <div class="grid grid-cols-2 gap-4 mt-2 text-sm">
+                    <div class="text-gray-400">WIN RATE</div>
+                    <div class="text-right">65.2%</div>
+                    <div class="text-gray-400">PROFIT FACTOR</div>
+                    <div class="text-right val-up">2.33</div>
+                    <div class="text-gray-400">TRADES</div>
+                    <div class="text-right">23</div>
+                </div>
+            </div>
+
+            <div class="mt-auto">
+                <div class="bb-header">SYSTEM HEALTH</div>
+                <div class="mt-2 text-xs space-y-2">
+                    <div class="flex justify-between"><span>CPU</span><span class="text-white">12%</span></div>
+                    <div class="w-full bg-gray-800 h-1"><div class="bg-green-500 h-1" style="width: 12%"></div></div>
+                    
+                    <div class="flex justify-between"><span>MEM</span><span class="text-white">64MB</span></div>
+                    <div class="w-full bg-gray-800 h-1"><div class="bg-green-500 h-1" style="width: 15%"></div></div>
+                    
+                    <div class="flex justify-between"><span>DISK</span><span class="text-white">81%</span></div>
+                    <div class="w-full bg-gray-800 h-1"><div class="bg-yellow-500 h-1" style="width: 81%"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Main Chart -->
+        <div class="bb-box p-2">
+            <div class="absolute top-2 left-2 z-10">
+                <div class="bb-header">EQUITY CURVE</div>
+            </div>
+            <canvas id="mainChart"></canvas>
+        </div>
+
+        <!-- 4. Right: Active Position -->
+        <div class="bb-box p-4">
+            <div class="bb-header">ACTIVE POSITION</div>
+            
+            <div class="mt-4 border border-green-900 bg-green-900/10 p-3 text-center">
+                <div class="text-xs text-green-500">DIRECTION</div>
+                <div class="text-3xl font-bold val-up">UP</div>
+            </div>
+            
+            <div class="space-y-3 mt-4 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-gray-500">ENTRY</span>
+                    <span>$0.76</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-500">MARKET</span>
+                    <span>$0.92</span>
+                </div>
+                <div class="flex justify-between border-t border-gray-800 pt-2">
+                    <span class="text-gray-500">PNL</span>
+                    <span class="val-up">+21.0%</span>
+                </div>
+            </div>
+            
+            <div class="mt-8">
+                <div class="bb-header">LOGS</div>
+                <div class="mt-2 text-[10px] text-gray-400 font-mono space-y-1">
+                    <div>> 17:01:41 BUY UP @ 0.76</div>
+                    <div>> 17:02:00 Monitoring...</div>
+                    <div>> 17:03:00 Diff: +$80.8</div>
+                    <div class="text-white">> 17:10:00 Diff: +$120.5</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. Bottom: Trade Blotter -->
+        <div class="bb-box col-span-3 p-2 overflow-hidden">
+            <div class="bb-header mb-2">TRADE BLOTTER (LAST 10)</div>
+            <table class="w-full text-xs text-left">
+                <thead class="text-gray-500 border-b border-gray-800">
+                    <tr>
+                        <th class="p-1">TIME</th>
+                        <th class="p-1">SYM</th>
+                        <th class="p-1">SIDE</th>
+                        <th class="p-1">ENTRY</th>
+                        <th class="p-1">EXIT</th>
+                        <th class="p-1 text-right">PNL</th>
+                        <th class="p-1 text-right">STATUS</th>
+                    </tr>
+                </thead>
+                <tbody class="text-gray-300">
+                    <tr><td class="p-1">16:45</td><td class="p-1">BTC-15M</td><td class="val-up">UP</td><td class="p-1">0.67</td><td class="p-1">1.00</td><td class="p-1 text-right val-up">+49%</td><td class="p-1 text-right">WIN</td></tr>
+                    <tr><td class="p-1">16:30</td><td class="p-1">BTC-15M</td><td class="val-down">DOWN</td><td class="p-1">0.72</td><td class="p-1">1.00</td><td class="p-1 text-right val-up">+38%</td><td class="p-1 text-right">WIN</td></tr>
+                    <tr><td class="p-1">16:15</td><td class="p-1">BTC-15M</td><td class="val-up">UP</td><td class="p-1">0.60</td><td class="p-1">1.00</td><td class="p-1 text-right val-up">+66%</td><td class="p-1 text-right">WIN</td></tr>
+                    <tr class="opacity-50"><td class="p-1">16:00</td><td class="p-1">BTC-15M</td><td>--</td><td>--</td><td>--</td><td class="p-1 text-right">--</td><td class="p-1 text-right">SKIP</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Chart Configuration (Bloomberg Style)
+        const ctx = document.getElementById('mainChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['04:00', '06:00', '08:00', '10:00', '12:00', '14:00', '16:00'],
+                datasets: [{
+                    data: [0, 1.2, 2.5, 1.8, 3.5, 4.07, 4.5],
+                    borderColor: '#ff9900', // Bloomberg Orange
+                    borderWidth: 1.5,
+                    backgroundColor: 'rgba(255, 153, 0, 0.1)',
+                    fill: true,
+                    tension: 0,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { 
+                        grid: { color: '#222' },
+                        ticks: { color: '#666', font: { family: 'Share Tech Mono' } }
+                    },
+                    y: { 
+                        grid: { color: '#222' },
+                        ticks: { color: '#666', font: { family: 'Share Tech Mono' } }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
