@@ -36,7 +36,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        RotatingFileHandler('polymarket-bot/bot.log', maxBytes=5*1024*1024, backupCount=3) # 5MB limit, keep 3 backups
+        RotatingFileHandler('bot.log', maxBytes=5*1024*1024, backupCount=3) # 5MB limit, keep 3 backups
     ]
 )
 logger = logging.getLogger(__name__)
@@ -606,6 +606,16 @@ class PolymarketBotV3:
 
     async def settle_positions(self, market, final_price):
         """Settle open positions for paper trading"""
+        # [Real Trading] Auto-Redeem Logic
+        if not self.paper_trade and self.clob_client:
+            try:
+                logger.info("💰 尝试自动赎回盈利头寸...")
+                # Redeem all winnings for this condition ID
+                resp = self.clob_client.redeem_winning_positions(market.condition_id)
+                logger.info(f"✅ 赎回成功: {resp}")
+            except Exception as e:
+                logger.error(f"赎回失败 (可能无盈利或已赎回): {e}")
+
         if not self.paper_trade: return
         
         strike = market.strike_price
@@ -631,6 +641,7 @@ class PolymarketBotV3:
                     "time": datetime.now(timezone.utc).isoformat(),
                     "type": "SETTLED",
                     "market": market.slug,
+                    "condition_id": market.condition_id, # [New] Added for Auto-Redeem
                     "direction": p["direction"],
                     "entry_price": p["entry_price"],
                     "exit_price": payout, # 1.0 or 0.0

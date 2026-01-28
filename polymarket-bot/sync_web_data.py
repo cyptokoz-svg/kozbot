@@ -81,5 +81,9 @@ def push_to_github():
         print(f"Git Error: {e}")
 
 if __name__ == "__main__":
-    generate_web_data()
-    # push_to_github() # Uncomment to auto-push
+    import time
+    while True:
+        generate_web_data()
+        push_to_github()
+        print("Waiting 60s...")
+        time.sleep(60)
