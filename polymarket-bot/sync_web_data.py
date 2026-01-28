@@ -63,18 +63,22 @@ def generate_web_data():
         "recentTrades": trades[-10:][::-1] # Last 10 reversed
     }
     
-    # Ensure dir exists
+    # Ensure dirs exist
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     
+    # Double-write for robustness
     with open(OUTPUT_FILE, "w") as f:
         json.dump(data, f, indent=2)
+    with open("data.json", "w") as f:
+        json.dump(data, f, indent=2)
     
-    print(f"✅ Generated {OUTPUT_FILE}")
+    print(f"✅ Generated {OUTPUT_FILE} and root data.json")
 
 def push_to_github():
     try:
-        subprocess.run(["git", "add", OUTPUT_FILE], check=True)
-        subprocess.run(["git", "commit", "-m", "chore: Update web data"], check=True)
+        # Commit all data files
+        subprocess.run(["git", "add", OUTPUT_FILE, "data.json"], check=True)
+        subprocess.run(["git", "commit", "-m", "chore: update trade data (hotfix)"], check=True)
         subprocess.run(["git", "push", "origin", "main"], check=True)
         print("🚀 Data pushed to GitHub!")
     except Exception as e:
@@ -85,5 +89,5 @@ if __name__ == "__main__":
     while True:
         generate_web_data()
         push_to_github()
-        print("Waiting 60s...")
-        time.sleep(60)
+        print("Waiting 300s...")
+        time.sleep(300)

@@ -4,9 +4,15 @@ on:
   push:
     paths:
       - 'polymarket-bot/**'
+      - 'public/**'
   pull_request:
     paths:
       - 'polymarket-bot/**'
+
+# 预防“撞车”：如果上一个任务还没跑完，自动取消它，跑最新的
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backtest:
