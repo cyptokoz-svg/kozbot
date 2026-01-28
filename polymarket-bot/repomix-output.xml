@@ -1,0 +1,1597 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+The content has been processed where empty lines have been removed.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: *.jsonl, *.log, venv/, __pycache__/, *.pkl, paper_trades_*.jsonl
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Empty lines have been removed from all files
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.env.example
+.gitignore
+auto_redeem.py
+btc_15m_bot_v3.py
+check_account.py
+check_balance.py
+check_prev_market.py
+fetch_history.py
+gemini_trader.py
+inspect_market.py
+polymarket-bot.service
+README.md
+repomix.config.json
+test_connection.py
+test_order.py
+train_ml.py
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".env.example">
+# Polymarket Bot Configuration
+# Copy this to .env and fill in your values
+
+# Your wallet private key (WITHOUT 0x prefix)
+PRIVATE_KEY=your_private_key_here
+
+# Funder address (the address that holds your USDC on Polymarket)
+# If using EOA directly, this is usually the same as your wallet address
+FUNDER_ADDRESS=your_funder_address_here
+
+# Risk Management
+MAX_POSITION_SIZE=10.0      # Max USDC per trade
+MAX_DAILY_LOSS=50.0         # Stop trading if daily loss exceeds this
+MIN_EDGE=0.02               # Minimum edge (2%) to take a trade
+
+# Strategy
+STRATEGY=momentum           # momentum, mean_reversion, or random_baseline
+CONFIDENCE_THRESHOLD=0.55   # Minimum confidence to trade (0.5-1.0)
+
+# Monitoring
+TELEGRAM_NOTIFY=true        # Send trade notifications
+LOG_LEVEL=INFO
+</file>
+
+<file path=".gitignore">
+.env
+</file>
+
+<file path="auto_redeem.py">
+#!/usr/bin/env python3
+"""
+自动赎回已结算市场的仓位
+检查持仓，如果市场已结算且持有胜出方，自动赎回 USDC
+"""
+import os
+import requests
+from dotenv import load_dotenv
+from py_clob_client.client import ClobClient
+load_dotenv()
+CLOB_HOST = "https://clob.polymarket.com"
+DATA_API = "https://data-api.polymarket.com"
+GAMMA_API = "https://gamma-api.polymarket.com"
+CHAIN_ID = 137
+def get_positions(address: str) -> list:
+    """获取所有持仓"""
+    resp = requests.get(
+        f"{DATA_API}/positions",
+        params={"user": address.lower()},
+        timeout=15
+    )
+    return resp.json()
+def get_market_info(condition_id: str) -> dict:
+    """获取市场详细信息"""
+    try:
+        resp = requests.get(
+            f"{GAMMA_API}/markets",
+            params={"conditionId": condition_id},
+            timeout=10
+        )
+        markets = resp.json()
+        return markets[0] if markets else {}
+    except:
+        return {}
+def check_redeemable(client: ClobClient, positions: list) -> list:
+    """检查哪些仓位可以赎回"""
+    redeemable = []
+    for pos in positions:
+        condition_id = pos.get('conditionId', '')
+        if not condition_id:
+            continue
+        # 获取市场信息
+        market = get_market_info(condition_id)
+        if not market:
+            continue
+        # 检查是否已结算
+        if not market.get('closed', False):
+            continue
+        winning_outcome = market.get('winningOutcome', '').lower()
+        if not winning_outcome:
+            continue
+        # 检查是否持有胜出方
+        outcome = pos.get('outcome', '').lower()
+        size = float(pos.get('size', 0))
+        if outcome == winning_outcome and size > 0:
+            redeemable.append({
+                'question': market.get('question', 'Unknown'),
+                'condition_id': condition_id,
+                'outcome': outcome,
+                'size': size,
+                'value': size  # 胜出方每 share 价值 $1
+            })
+    return redeemable
+def redeem_positions(client: ClobClient, redeemable: list) -> list:
+    """赎回仓位（返回结果列表）"""
+    results = []
+    for pos in redeemable:
+        try:
+            # Polymarket 的赎回是自动的，当市场结算后，
+            # 胜出的 token 会自动变成 USDC
+            # 但如果需要手动触发，可以通过 CTF 合约
+            # 目前 py-clob-client 不直接支持 redeem
+            # 这里记录可赎回的仓位
+            results.append({
+                'status': 'pending',
+                'question': pos['question'][:50],
+                'outcome': pos['outcome'],
+                'value': pos['value']
+            })
+            print(f"💰 可赎回: {pos['question'][:50]}")
+            print(f"   {pos['outcome'].upper()} x {pos['size']:.4f} = ${pos['value']:.2f}")
+        except Exception as e:
+            results.append({
+                'status': 'error',
+                'error': str(e)
+            })
+    return results
+def main():
+    print("=" * 60)
+    print("Polymarket 自动赎回检查")
+    print("=" * 60)
+    private_key = os.getenv("PRIVATE_KEY")
+    funder = os.getenv("FUNDER_ADDRESS")
+    if not private_key or not funder:
+        print("错误: 需要设置 PRIVATE_KEY 和 FUNDER_ADDRESS")
+        return
+    print(f"\n钱包: {funder[:10]}...{funder[-6:]}")
+    # 初始化客户端
+    client = ClobClient(
+        CLOB_HOST,
+        key=private_key,
+        chain_id=CHAIN_ID,
+        signature_type=2,
+        funder=funder
+    )
+    client.set_api_creds(client.create_or_derive_api_creds())
+    # 获取持仓
+    print("\n获取持仓...")
+    positions = get_positions(funder)
+    print(f"总持仓数: {len(positions)}")
+    if not positions:
+        print("没有持仓")
+        return
+    # 检查可赎回
+    print("\n检查可赎回仓位...")
+    redeemable = check_redeemable(client, positions)
+    if not redeemable:
+        print("没有可赎回的仓位")
+        print("\n当前持仓状态:")
+        for pos in positions:
+            outcome = pos.get('outcome', 'N/A')
+            size = float(pos.get('size', 0))
+            print(f"  • {size:.4f} {outcome} (市场未结算)")
+        return
+    # 显示可赎回
+    print(f"\n发现 {len(redeemable)} 个可赎回仓位:")
+    total_value = 0
+    for pos in redeemable:
+        print(f"  💰 {pos['question'][:40]}...")
+        print(f"     {pos['outcome'].upper()} x {pos['size']:.4f} = ${pos['value']:.2f}")
+        total_value += pos['value']
+    print(f"\n总可赎回: ${total_value:.2f}")
+    # 注意：实际赎回需要调用 CTF 合约
+    print("\n注意: Polymarket 的已结算仓位通常会自动转为 USDC")
+    print("如果没有自动转换，请在 polymarket.com 手动赎回")
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="btc_15m_bot_v3.py">
+#!/usr/bin/env python3
+"""
+Polymarket BTC 15-minute Trading Bot v3 (Smart Probability)
+- Retrieves 'Strike Price' (Open price of the 15m candle) from Binance.
+- Calculates theoretical probability based on distance to strike and time remaining.
+- Trades only when market price deviates significantly from fair value.
+"""
+import os
+import sys
+import json
+import time
+import math
+import asyncio
+import logging
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict, List, Tuple
+from dataclasses import dataclass, field
+import statistics
+import requests
+import websockets
+from dotenv import load_dotenv
+from py_clob_client.client import ClobClient
+from py_clob_client.clob_types import OrderArgs, OrderType
+from py_clob_client.order_builder.constants import BUY
+# Load environment
+load_dotenv()
+from logging.handlers import RotatingFileHandler
+# Setup logging
+logging.basicConfig(
+    level=getattr(logging, os.getenv('LOG_LEVEL', 'INFO')),
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler('bot.log', maxBytes=5*1024*1024, backupCount=3) # 5MB limit, keep 3 backups
+    ]
+)
+logger = logging.getLogger(__name__)
+# Constants
+CLOB_HOST = "https://clob.polymarket.com"
+GAMMA_API = "https://gamma-api.polymarket.com"
+WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+CHAIN_ID = 137
+@dataclass
+class OrderBook:
+    """Real-time order book"""
+    asset_id: str
+    best_bid: float = 0.0
+    best_ask: float = 1.0
+    def update(self, data: dict):
+        if data.get("event_type") == "price_change":
+            for change in data.get("price_changes", []):
+                if change.get("asset_id") == self.asset_id:
+                    self.best_bid = float(change.get("best_bid", 0) or 0)
+                    self.best_ask = float(change.get("best_ask", 1) or 1)
+        elif data.get("event_type") == "book":
+             bids = data.get("bids", [])
+             asks = data.get("asks", [])
+             if bids: self.best_bid = float(bids[0]["price"])
+             if asks: self.best_ask = float(asks[0]["price"])
+@dataclass
+class Market15m:
+    condition_id: str
+    question: str
+    token_id_up: str
+    token_id_down: str
+    start_time: datetime
+    end_time: datetime
+    slug: str
+    # Real-time data
+    book_up: OrderBook = None
+    book_down: OrderBook = None
+    strike_price: Optional[float] = None  # The BTC price at start_time
+    def __post_init__(self):
+        self.book_up = OrderBook(self.token_id_up)
+        self.book_down = OrderBook(self.token_id_down)
+    @property
+    def time_remaining(self) -> timedelta:
+        return self.end_time - datetime.now(timezone.utc)
+    @property
+    def is_active(self) -> bool:
+        return self.time_remaining.total_seconds() > 30
+    @property
+    def up_price(self) -> float:
+        return self.book_up.best_ask if self.book_up.best_ask > 0 else 0.5
+    @property
+    def down_price(self) -> float:
+        return self.book_down.best_ask if self.book_down.best_ask > 0 else 0.5
+class BinanceData:
+    """Helper to fetch Binance data"""
+    @staticmethod
+    def get_candle_open(timestamp_ms: int) -> Optional[float]:
+        """Get the Open price of the candle starting at timestamp"""
+        try:
+            # Kline interval 1m
+            url = "https://api.binance.com/api/v3/klines"
+            params = {
+                "symbol": "BTCUSDT",
+                "interval": "1m",
+                "startTime": timestamp_ms,
+                "limit": 1
+            }
+            logger.info(f"Fetching Binance Candle for TS: {timestamp_ms} ({datetime.fromtimestamp(timestamp_ms/1000, timezone.utc)})")
+            resp = requests.get(url, params=params, timeout=5)
+            data = resp.json()
+            if data and len(data) > 0:
+                open_price = float(data[0][1])
+                logger.info(f"Binance Open Price: {open_price}")
+                return open_price
+            return None
+        except Exception as e:
+            logger.error(f"Binance API error: {e}")
+            return None
+    @staticmethod
+    def get_current_price() -> Optional[float]:
+        try:
+            resp = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
+            return float(resp.json()["price"])
+        except:
+            return None
+class MarketCycleManager:
+    """Manages finding active markets"""
+    def __init__(self):
+        self.past_markets = []
+    def fetch_market(self) -> Optional[Market15m]:
+        try:
+            # Calculate current 15m cycle strictly by time
+            now = datetime.now(timezone.utc)
+            current_ts = int(now.timestamp())
+            current_15m_ts = (current_ts // 900) * 900
+            # Use calculated timestamp for slug AND start_time
+            slug = f"btc-updown-15m-{current_15m_ts}"
+            # Start time is strictly the 15m boundary
+            start_time = datetime.fromtimestamp(current_15m_ts, timezone.utc)
+            # End time is +15m
+            end_time = start_time + timedelta(minutes=15)
+            resp = requests.get(f"{GAMMA_API}/events?slug={slug}", timeout=10)
+            events = resp.json()
+            if not events:
+                # Try next slot if we are close to end? No, stick to current.
+                return None
+            event = events[0]
+            if event.get("closed"): return None
+            markets = event.get("markets", [])
+            if not markets or not markets[0].get("acceptingOrders"): return None
+            m_data = markets[0]
+            token_ids = json.loads(m_data.get("clobTokenIds", "[]"))
+            outcomes = json.loads(m_data.get("outcomes", '["Up", "Down"]'))
+            if outcomes[0].lower() == "up":
+                t_up, t_down = token_ids[0], token_ids[1]
+            else:
+                t_up, t_down = token_ids[1], token_ids[0]
+            return Market15m(
+                condition_id=m_data.get("conditionId"),
+                question=m_data.get("question", event.get("title")),
+                token_id_up=t_up,
+                token_id_down=t_down,
+                start_time=start_time, # Use calculated strict time
+                end_time=end_time,     # Use calculated strict time
+                slug=event.get("slug")
+            )
+        except Exception as e:
+            logger.error(f"Fetch market error: {e}")
+            return None
+class ProbabilityStrategy:
+    """Calculates Fair Value based on Normal Distribution"""
+    def __init__(self):
+        self.volatility_per_min = 25.0  # Conservative BTC vol/min in USD (approx)
+        # TODO: Calculate dynamic vol
+    def calculate_prob_up(self, current_price: float, strike_price: float, minutes_left: float) -> float:
+        """
+        Calculate Probability(Final Price > Strike)
+        Assumes Brownian motion (Normal distribution of price changes).
+        """
+        if minutes_left <= 0:
+            return 1.0 if current_price >= strike_price else 0.0
+        # Standard Deviation for the remaining time
+        # sigma_t = sigma_1min * sqrt(t)
+        sigma_t = self.volatility_per_min * math.sqrt(minutes_left)
+        if sigma_t == 0:
+            return 1.0 if current_price >= strike_price else 0.0
+        # Z-score: How many std devs is current price away from strike?
+        # If current > strike, Z is positive.
+        z_score = (current_price - strike_price) / sigma_t
+        # Cumulative Distribution Function (CDF)
+        prob_up = 0.5 * (1 + math.erf(z_score / math.sqrt(2)))
+        return prob_up
+import joblib
+# ... imports ...
+class PolymarketBotV3:
+    def __init__(self):
+        self.running = True
+        self.paper_trade = True
+        self.positions = []
+        self.cycle_manager = MarketCycleManager()
+        self.strategy = ProbabilityStrategy()
+        # Trading Parameters
+        self.stop_loss_pct = 0.25      # 25% Stop Loss
+        self.fee_pct = 0.001           # 0.1% Fee estimate
+        self.safety_margin_pct = 0.0005 # $50 on $100k BTC (tight)
+        self.min_edge = 0.10           # 10% Probability Edge required
+        self.performance_history = [] 
+        # Load ML Model
+        self.ml_model = None
+        if os.path.exists("polymarket-bot/ml_model_v1.pkl"):
+            try:
+                self.ml_model = joblib.load("polymarket-bot/ml_model_v1.pkl")
+                logger.info("🧠 ML Model Loaded: Random Forest v1")
+            except Exception as e:
+                logger.error(f"Failed to load ML model: {e}")
+    # ... existing analyze_performance ...
+    async def trade_loop(self, market: Market15m):
+        # ... setup ...
+        while self.running and market.is_active:
+            # 1. Get Data
+            current_btc = BinanceData.get_current_price()
+            if not current_btc:
+                await asyncio.sleep(2)
+                continue
+            time_left = market.time_remaining.total_seconds() / 60.0 # minutes
+            # 2. Calculate Fair Value (Probabilistic)
+            prob_up = self.strategy.calculate_prob_up(current_btc, market.strike_price, time_left)
+            prob_down = 1.0 - prob_up
+            # 3. AI Prediction (Machine Learning)
+            ai_confidence = 0.0
+            if self.ml_model:
+                try:
+                    # Features: ['entry_price', 'direction_code', 'hour']
+                    # We simulate both directions to see which one AI likes
+                    # Note: Our training data used simple features. We need to match feature_engineering in train_ml.py
+                    # Actually, let's simplify. If AI predicts UP wins, we boost prob_up.
+                    # Current hour
+                    hour = datetime.now(timezone.utc).hour
+                    # Predict UP
+                    # Features must match training: [entry_price, direction_code, hour]
+                    # We don't have entry_price yet, use current market price
+                    X_up = [[market.up_price, 1, hour]]
+                    X_down = [[market.down_price, 0, hour]]
+                    # Predict Class (1=WIN, 0=LOSS)
+                    pred_up = self.ml_model.predict(X_up)[0]
+                    pred_down = self.ml_model.predict(X_down)[0]
+                    if pred_up == 1: 
+                        prob_up += 0.05 # Boost UP probability by 5%
+                        logger.debug("🧠 AI likes UP")
+                    if pred_down == 1: 
+                        prob_down += 0.05 # Boost DOWN
+                        logger.debug("🧠 AI likes DOWN")
+                except Exception as e:
+                    pass # Ignore ML errors, fallback to math
+            # 4. Decision (with AI boost)
+            # ... rest of decision logic ...
+    def analyze_performance(self):
+        """Self-Correction: Adjust parameters based on recent performance"""
+        try:
+            if not os.path.exists("paper_trades.jsonl"): return
+            # File Size Protection: If > 10MB, rotate it
+            if os.path.getsize("paper_trades.jsonl") > 10 * 1024 * 1024:
+                logger.info("维护: paper_trades.jsonl 过大，进行归档清理...")
+                os.rename("paper_trades.jsonl", f"paper_trades_{int(time.time())}.jsonl")
+            wins = 0
+            losses = 0
+            gross_profit = 0.0
+            gross_loss = 0.0
+            recent_trades = []
+            with open("paper_trades.jsonl", "r") as f:
+                for line in f:
+                    try:
+                        trade = json.loads(line)
+                        if "pnl" in trade: # Closed trade
+                            recent_trades.append(trade)
+                    except: pass
+            # Analyze last 20 closed trades for statistical significance
+            recent_trades = recent_trades[-20:]
+            if not recent_trades: return
+            for t in recent_trades:
+                pnl = float(t["pnl"])
+                if pnl > 0: 
+                    wins += 1
+                    gross_profit += pnl
+                else: 
+                    losses += 1
+                    gross_loss += abs(pnl)
+            total = wins + losses
+            if total == 0: return
+            win_rate = wins / total
+            profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+            avg_win = gross_profit / wins if wins > 0 else 0
+            avg_loss = gross_loss / losses if losses > 0 else 0
+            # Log Core Metrics for User
+            logger.info(f"📊 业绩分析 (最近{total}笔):")
+            logger.info(f"   胜率: {win_rate:.0%} | 盈亏比 (Profit Factor): {profit_factor:.2f}")
+            logger.info(f"   平均盈利: +{avg_win:.1%} | 平均亏损: -{avg_loss:.1%}")
+            # Auto-Adjustment Logic (Optimizing for Profit Factor > 1.5)
+            old_margin = self.safety_margin_pct
+            if profit_factor < 1.0 or win_rate < 0.4:
+                # Losing money: Tighten significantly
+                self.safety_margin_pct = min(0.002, self.safety_margin_pct * 1.2)
+                self.min_edge = min(0.25, self.min_edge + 0.02)
+                logger.info(f"📉 表现不佳 (PF < 1.0). 收紧风控: Margin -> {self.safety_margin_pct:.2%}, Edge -> {self.min_edge:.2%}")
+            elif profit_factor > 2.0 and win_rate > 0.6:
+                # Making good money: Optimize for volume
+                self.safety_margin_pct = max(0.0002, self.safety_margin_pct * 0.9)
+                self.min_edge = max(0.05, self.min_edge - 0.01)
+                logger.info(f"📈 表现优异 (PF > 2.0). 释放流动性: Margin -> {self.safety_margin_pct:.2%}, Edge -> {self.min_edge:.2%}")
+        except Exception as e:
+            logger.error(f"Auto-tune error: {e}")
+    async def run(self):
+        logger.info("启动 V3 智能策略机器人 (Probability/Fair Value)...")
+        logger.info(f"配置: 止损线 -{self.stop_loss_pct*100}% | 模拟费率 {self.fee_pct*100}%")
+        if self.paper_trade: logger.info("[模式] 模拟交易 (全权限托管)")
+        while self.running:
+            try:
+                # Run Auto-Tuning every cycle
+                self.analyze_performance()
+                # Cleanup old positions from previous cycles
+                self.positions = [p for p in self.positions if (datetime.now(timezone.utc) - datetime.fromisoformat(p["timestamp"])).total_seconds() < 3600]
+                market = self.cycle_manager.fetch_market()
+                if not market:
+                    logger.info("等待活跃市场...")
+                    await asyncio.sleep(10)
+                    continue
+                # Fetch Strike Price (Open Price)
+                # Ensure the market start time has passed so the candle exists
+                now = datetime.now(timezone.utc)
+                if now < market.start_time:
+                    logger.info(f"等待市场开始: {market.start_time}")
+                    await asyncio.sleep(5)
+                    continue
+                logger.info(f"选中市场: {market.question}")
+                # Get Strike Price (Binance)
+                # Need timestamp in ms
+                start_ts_ms = int(market.start_time.timestamp() * 1000)
+                # Retry fetching strike until available (Binance might delay 1-2s)
+                strike_price = None
+                for _ in range(5):
+                    strike_price = BinanceData.get_candle_open(start_ts_ms)
+                    if strike_price: break
+                    logger.info("等待 Strike Price (Binance Candle)...")
+                    await asyncio.sleep(2)
+                if not strike_price:
+                    logger.error("无法获取 Strike Price，跳过此周期")
+                    await asyncio.sleep(30)
+                    continue
+                market.strike_price = strike_price
+                logger.info(f"🎯 Strike Price (锁定): ${strike_price:,.2f}")
+                # Start Trading Loop for this Market
+                await self.trade_loop(market)
+            except Exception as e:
+                logger.error(f"Main loop error: {e}")
+                await asyncio.sleep(5)
+    async def trade_loop(self, market: Market15m):
+        # WebSocket would go here (simplified for V3 POC to polling for clarity, can add WS back)
+        # For brevity in this write, using polling loop which is fine for 5s intervals.
+        # Ideally keep WS from V2.
+        ws_manager = WebSocketManagerV3(market)
+        await ws_manager.connect()
+        asyncio.create_task(ws_manager.listen())
+        logger.info(f"开始监控... 结算时间: {market.end_time}")
+        while self.running and market.is_active:
+            # 1. Get Data
+            current_btc = BinanceData.get_current_price()
+            if not current_btc:
+                await asyncio.sleep(2)
+                continue
+            time_left = market.time_remaining.total_seconds() / 60.0 # minutes
+            # 2. Calculate Fair Value
+            prob_up = self.strategy.calculate_prob_up(current_btc, market.strike_price, time_left)
+            prob_down = 1.0 - prob_up
+            # 3. AI Prediction Boost
+            if self.ml_model:
+                try:
+                    hour = datetime.now(timezone.utc).hour
+                    # Simple prediction based on market structure
+                    # If AI predicts WIN for UP, we boost prob_up
+                    # Warning: This is a simplified integration
+                    X = [[market.up_price, 1, hour]]
+                    if self.ml_model.predict(X)[0] == 1:
+                        prob_up += 0.05
+                except: pass
+            # 3. Compare with Market
+            # Market prices from WS
+            mkt_up = market.up_price
+            mkt_down = market.down_price
+            # 4. Decision
+            # Calculate dynamic Safety Margin to account for Binance vs Chainlink deviation
+            # using percentage (0.05%) instead of fixed amount
+            safety_margin = market.strike_price * self.safety_margin_pct
+            diff = current_btc - market.strike_price
+            # Check Stop Loss for existing positions
+            await self.check_stop_loss(market)
+            # If within safety margin (ambiguous zone), force neutral probability or skip
+            if abs(diff) < safety_margin:
+                logger.info(f"价格差异 ${diff:.1f} 在安全边际(${safety_margin:.1f}, {self.safety_margin_pct:.2%})内 - 跳过")
+                await asyncio.sleep(2)
+                continue
+            # Only trade if we don't have a position in this market yet (Simple mode)
+            has_position = any(p['market_slug'] == market.slug for p in self.positions)
+            if not has_position and abs(diff) >= safety_margin:
+                # Signal if Edge > Threshold
+                edge_up = prob_up - mkt_up
+                edge_down = prob_down - mkt_down
+                log_msg = (
+                    f"剩余 {time_left:.1f}m | BTC: ${current_btc:.1f} (Diff: ${diff:+.1f}) | "
+                    f"Prob UP: {prob_up:.1%} vs Mkt: {mkt_up:.1%} (Edge: {edge_up:+.1%})"
+                )
+                # Only log every 10s
+                if int(time.time()) % 10 == 0:
+                    logger.info(log_msg)
+                # Execute Trade
+                if edge_up > self.min_edge: 
+                    await self.execute_trade(market, "UP", 0.05)
+                elif edge_down > self.min_edge:
+                    await self.execute_trade(market, "DOWN", 0.05)
+            elif int(time.time()) % 10 == 0:
+                 logger.info(f"监控中... 持仓数: {len(self.positions)} | 价格差: ${diff:+.1f}")
+            await asyncio.sleep(2)
+        await ws_manager.close()
+        # MARKET SETTLEMENT (Simulated)
+        # Fetch Final Price (Binance Candle Open of the NEXT candle, or just current price if immediate)
+        # To be precise: The resolution price is typically the price AT expiration.
+        await asyncio.sleep(5) # Wait for dust to settle
+        final_price = BinanceData.get_current_price()
+        if final_price:
+            logger.info(f"市场结算! Final BTC: ${final_price}")
+            await self.settle_positions(market, final_price)
+    async def settle_positions(self, market, final_price):
+        """Settle open positions for paper trading"""
+        if not self.paper_trade: return
+        strike = market.strike_price
+        if not strike: return
+        # Determine Winner
+        # "Up" if Final >= Strike
+        winner = "UP" if final_price >= strike else "DOWN"
+        logger.info(f"🏆 结算结果: {winner} (Strike: {strike} vs Final: {final_price})")
+        # Iterate remaining positions for this market
+        for p in list(self.positions):
+            if p["market_slug"] != market.slug: continue
+            payout = 1.0 if p["direction"] == winner else 0.0
+            pnl_amt = payout - p["entry_price"]
+            pnl_pct = pnl_amt / p["entry_price"]
+            logger.info(f"💰 结算归档: {p['direction']} -> PnL: {pnl_pct:.1%}")
+            with open("paper_trades.jsonl", "a") as f:
+                f.write(json.dumps({
+                    "time": datetime.now(timezone.utc).isoformat(),
+                    "type": "SETTLED",
+                    "market": market.slug,
+                    "direction": p["direction"],
+                    "entry_price": p["entry_price"],
+                    "exit_price": payout, # 1.0 or 0.0
+                    "pnl": pnl_pct,
+                    "result": "WIN" if payout > 0 else "LOSS"
+                }) + "\n")
+            self.positions.remove(p)
+    async def check_stop_loss(self, market: Market15m):
+        """Check if any position needs to be stopped out"""
+        # Copy list to modify safe
+        for p in list(self.positions):
+            if p["market_slug"] != market.slug: continue
+            current_price = market.up_price if p["direction"] == "UP" else market.down_price
+            entry_price = p["entry_price"]
+            # PnL calculation
+            pnl_pct = (current_price - entry_price) / entry_price
+            if pnl_pct < -self.stop_loss_pct:
+                logger.warning(f"🛑 止损触发! {p['direction']} @ {current_price:.2f} (Entry: {entry_price:.2f}, PnL: {pnl_pct:.1%})")
+                if self.paper_trade:
+                    with open("paper_trades.jsonl", "a") as f:
+                        f.write(json.dumps({
+                            "time": datetime.now(timezone.utc).isoformat(),
+                            "type": "STOP_LOSS",
+                            "market": market.slug,
+                            "direction": p["direction"],
+                            "exit_price": current_price,
+                            "pnl": pnl_pct
+                        }) + "\n")
+                else:
+                    # Real sell logic would go here
+                    pass
+                self.positions.remove(p)
+    async def execute_trade(self, market, direction, size):
+        # Simple limit order logic
+        price = market.up_price if direction == "UP" else market.down_price
+        # Cap price
+        price = min(0.99, max(0.01, price))
+        if self.paper_trade:
+             logger.info(f"🔥 SIGNAL: BUY {direction} @ {price:.2f} (Paper Trade)")
+             # Record Position
+             self.positions.append({
+                 "market_slug": market.slug,
+                 "direction": direction,
+                 "entry_price": price,
+                 "size": size,
+                 "timestamp": datetime.now(timezone.utc).isoformat()
+             })
+             with open("paper_trades.jsonl", "a") as f:
+                 f.write(json.dumps({
+                     "time": datetime.now().isoformat(),
+                     "type": "V3_SMART",
+                     "direction": direction,
+                     "price": price,
+                     "strike": market.strike_price,
+                     "fee": self.fee_pct # Record fee assumption
+                 }) + "\n")
+             await asyncio.sleep(10) # Cooldown
+        else:
+            # Real execution code here
+            pass
+# --- Reusing WebSocket Manager from V2 for compactness ---
+class WebSocketManagerV3:
+    def __init__(self, market):
+        self.market = market
+        self.ws = None
+        self.running = False
+    async def connect(self):
+        self.ws = await websockets.connect(WS_URL)
+        msg = {"assets_ids": [self.market.token_id_up, self.market.token_id_down], "type": "market"}
+        await self.ws.send(json.dumps(msg))
+        self.running = True
+    async def listen(self):
+        try:
+            async for msg in self.ws:
+                if not self.running: break
+                if msg == "PONG": continue
+                try:
+                    data = json.loads(msg)
+                    if isinstance(data, list): [self._process(i) for i in data]
+                    else: self._process(data)
+                except: pass
+        except: pass
+    def _process(self, data):
+        asset = data.get("asset_id")
+        if asset == self.market.token_id_up: self.market.book_up.update(data)
+        elif asset == self.market.token_id_down: self.market.book_down.update(data)
+        elif data.get("event_type") == "price_change":
+            for p in data.get("price_changes", []):
+                aid = p.get("asset_id")
+                if aid == self.market.token_id_up: self.market.book_up.best_ask = float(p.get("best_ask") or 1)
+                elif aid == self.market.token_id_down: self.market.book_down.best_ask = float(p.get("best_ask") or 1)
+    async def close(self):
+        self.running = False
+        if self.ws: await self.ws.close()
+if __name__ == "__main__":
+    asyncio.run(PolymarketBotV3().run())
+</file>
+
+<file path="check_account.py">
+#!/usr/bin/env python3
+"""检查账户连接和余额"""
+import os
+from dotenv import load_dotenv
+from py_clob_client.client import ClobClient
+load_dotenv()
+CLOB_HOST = "https://clob.polymarket.com"
+CHAIN_ID = 137
+def main():
+    private_key = os.getenv("PRIVATE_KEY")
+    funder = os.getenv("FUNDER_ADDRESS")
+    print("=" * 50)
+    print("Polymarket 账户检查")
+    print("=" * 50)
+    print(f"Funder 地址: {funder}")
+    print(f"私钥: {private_key[:8]}...{private_key[-4:]}")
+    print()
+    # 初始化客户端
+    print("初始化 CLOB 客户端...")
+    client = ClobClient(
+        CLOB_HOST,
+        key=private_key,
+        chain_id=CHAIN_ID,
+        signature_type=2,  # Proxy wallet
+        funder=funder
+    )
+    # 创建/获取 API 凭据
+    print("获取 API 凭据...")
+    creds = client.create_or_derive_api_creds()
+    client.set_api_creds(creds)
+    print(f"  ✓ API Key: {creds.api_key[:16]}...")
+    # 测试连接
+    print("\n测试 API 连接...")
+    ok = client.get_ok()
+    print(f"  ✓ CLOB OK: {ok}")
+    # 获取余额（如果API支持）
+    print("\n尝试获取账户信息...")
+    try:
+        # 尝试获取开放订单
+        orders = client.get_orders()
+        print(f"  ✓ 当前开放订单: {len(orders) if orders else 0}")
+    except Exception as e:
+        print(f"  (无法获取订单: {e})")
+    print("\n" + "=" * 50)
+    print("✓ 账户连接成功！准备就绪。")
+    print("=" * 50)
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="check_balance.py">
+#!/usr/bin/env python3
+"""检查 Polymarket 钱包余额"""
+import os
+import requests
+from dotenv import load_dotenv
+load_dotenv()
+funder = os.getenv("FUNDER_ADDRESS")
+print(f"检查钱包: {funder}\n")
+# 1. 通过 Data API 获取用户持仓
+print("=" * 40)
+print("持仓信息")
+print("=" * 40)
+try:
+    resp = requests.get(
+        f"https://data-api.polymarket.com/positions",
+        params={"user": funder.lower()},
+        timeout=15
+    )
+    positions = resp.json()
+    print(f"持仓数量: {len(positions)}")
+    for p in positions[:10]:
+        market = p.get('market', {})
+        print(f"  • {market.get('question', 'Unknown')[:60]}")
+        print(f"    数量: {p.get('size', 0)}, 方向: {p.get('outcome', 'N/A')}")
+except Exception as e:
+    print(f"获取持仓失败: {e}")
+# 2. Polygon USDC 余额
+print("\n" + "=" * 40)
+print("Polygon 链上余额")
+print("=" * 40)
+# USDC.e on Polygon (bridged USDC)
+USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+# Native USDC on Polygon
+USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+for name, contract in [("USDC.e", USDC_E), ("USDC", USDC_NATIVE)]:
+    try:
+        resp = requests.get(
+            "https://api.polygonscan.com/api",
+            params={
+                "module": "account",
+                "action": "tokenbalance",
+                "contractaddress": contract,
+                "address": funder,
+                "tag": "latest"
+            },
+            timeout=10
+        )
+        data = resp.json()
+        if data.get("status") == "1":
+            balance_wei = int(data.get("result", 0))
+            balance = balance_wei / 1e6
+            print(f"{name}: ${balance:,.2f}")
+    except Exception as e:
+        print(f"{name}: 查询失败 - {e}")
+# MATIC
+try:
+    resp = requests.get(
+        "https://api.polygonscan.com/api",
+        params={
+            "module": "account",
+            "action": "balance",
+            "address": funder,
+            "tag": "latest"
+        },
+        timeout=10
+    )
+    data = resp.json()
+    if data.get("status") == "1":
+        balance_wei = int(data.get("result", 0))
+        balance = balance_wei / 1e18
+        print(f"MATIC: {balance:.4f}")
+except Exception as e:
+    print(f"MATIC: 查询失败 - {e}")
+# 3. 检查 Polymarket 交易历史
+print("\n" + "=" * 40)
+print("最近交易")
+print("=" * 40)
+try:
+    resp = requests.get(
+        f"https://data-api.polymarket.com/activity",
+        params={"user": funder.lower(), "limit": 5},
+        timeout=15
+    )
+    activities = resp.json()
+    if activities:
+        for a in activities[:5]:
+            print(f"  • {a.get('type', 'Unknown')}: {a.get('market', {}).get('question', '')[:40]}")
+    else:
+        print("  (无交易记录)")
+except Exception as e:
+    print(f"获取交易历史失败: {e}")
+print("\n" + "=" * 40)
+</file>
+
+<file path="check_prev_market.py">
+import requests
+import json
+from datetime import datetime
+# 18:30 UTC timestamp was 1769538600
+# So previous market (18:15 UTC) start timestamp was 1769537700
+slug_prev = "btc-updown-15m-1769537700"
+GAMMA_API = "https://gamma-api.polymarket.com"
+def check_prev_market():
+    resp = requests.get(f"{GAMMA_API}/events", params={"slug": slug_prev})
+    if resp.status_code == 200:
+        data = resp.json()
+        if data:
+            # Look for resolution details in the markets
+            m = data[0].get("markets", [])[0]
+            print(json.dumps(m, indent=2))
+        else:
+            print("No data for prev market")
+check_prev_market()
+</file>
+
+<file path="fetch_history.py">
+import requests
+import json
+import time
+from datetime import datetime, timezone, timedelta
+GAMMA_API = "https://gamma-api.polymarket.com"
+# Fetch past 24h of BTC 15m markets
+# We need to reconstruct the "slugs" or just search by tag/series
+# Series slug: "btc-up-or-down-15m" (From previous inspect)
+def fetch_historical_markets():
+    print("Fetching historical markets from Gamma API...")
+    # Calculate timestamps for the last 24h (96 markets)
+    now = int(time.time())
+    start_ts = now - 86400
+    # Align to 15m
+    start_ts = (start_ts // 900) * 900
+    markets_data = []
+    for ts in range(start_ts, now, 900):
+        slug = f"btc-updown-15m-{ts}"
+        try:
+            resp = requests.get(f"{GAMMA_API}/events?slug={slug}", timeout=5)
+            data = resp.json()
+            if not data:
+                print(f"Skipping {slug} (No data)")
+                continue
+            event = data[0]
+            market = event.get("markets", [])[0]
+            # We need: Strike Price, End Price (Resolution), and Result
+            # Strike Price is not explicitly in API, but it's the Open Price of the candle at StartTime
+            # We will fetch that from Binance later.
+            # Result: "outcomePrices": "[\"1\", \"0\"]" -> UP won
+            prices = json.loads(market.get("outcomePrices", '["0.5", "0.5"]'))
+            winner = "UP" if prices[0] == "1" else "DOWN" if prices[1] == "1" else "UNKNOWN"
+            if winner == "UNKNOWN": continue
+            start_time_iso = event.get("startDate") # 2026-01-27T18:30:00Z
+            markets_data.append({
+                "ts": ts,
+                "start_time": start_time_iso,
+                "winner": winner,
+                "slug": slug
+            })
+            print(f"Found: {slug} -> {winner}")
+            time.sleep(0.1) # Rate limit nice
+        except Exception as e:
+            print(f"Error fetching {slug}: {e}")
+    return markets_data
+def enrich_with_binance(markets):
+    print("\nEnriching with Binance OHLCV data...")
+    enriched = []
+    for m in markets:
+        ts_ms = m["ts"] * 1000
+        # Get candle at start time (Strike)
+        # And candle at end time (Resolution) - roughly +15m
+        try:
+            # Get Strike (Open of start candle)
+            url = "https://api.binance.com/api/v3/klines"
+            # 1. Strike Price
+            params = {"symbol": "BTCUSDT", "interval": "1m", "startTime": ts_ms, "limit": 1}
+            resp = requests.get(url, params=params, timeout=5)
+            kline_start = resp.json()
+            strike = float(kline_start[0][1]) # Open
+            # 2. Volatility / Trend Feature (Previous 15m candle)
+            # Get the candle BEFORE this market started to calculate trend
+            params_prev = {"symbol": "BTCUSDT", "interval": "15m", "startTime": ts_ms - 900000, "limit": 1}
+            resp_prev = requests.get(url, params=params_prev, timeout=5)
+            kline_prev = resp_prev.json()
+            prev_open = float(kline_prev[0][1])
+            prev_close = float(kline_prev[0][4])
+            trend_pct = (prev_close - prev_open) / prev_open
+            m["strike_price"] = strike
+            m["prev_trend"] = trend_pct
+            enriched.append(m)
+            print(f"Enriched {m['slug']}: Strike {strike}, Trend {trend_pct:.4%}")
+            time.sleep(0.1)
+        except Exception as e:
+            print(f"Binance error for {m['slug']}: {e}")
+    return enriched
+def save_to_training_data(data):
+    # Convert to format compatible with training script
+    # We need to simulate "trades". 
+    # Since we know the winner, we can generate synthetic "Winning Trades" to teach the model WHAT WINS.
+    print(f"\nGenerating synthetic training data from {len(data)} markets...")
+    with open("polymarket-bot/paper_trades.jsonl", "a") as f:
+        for m in data:
+            # Synthetic Trade: If UP won, we simulate a "BUY UP" trade that won.
+            # We want the model to learn to predict the WINNER.
+            record = {
+                "time": m["start_time"],
+                "type": "SETTLED", # Mark as settled for training
+                "market": m["slug"],
+                "direction": m["winner"], # The winning direction
+                "entry_price": 0.50, # Assume avg entry
+                "exit_price": 1.0,
+                "pnl": 1.0, # Dummy positive PnL
+                "result": "WIN",
+                # Extra features for ML
+                "strike_price": m["strike_price"],
+                "prev_trend": m["prev_trend"]
+            }
+            f.write(json.dumps(record) + "\n")
+    print("✅ Successfully appended historical data to paper_trades.jsonl")
+if __name__ == "__main__":
+    markets = fetch_historical_markets()
+    if markets:
+        enriched = enrich_with_binance(markets)
+        save_to_training_data(enriched)
+</file>
+
+<file path="gemini_trader.py">
+import os
+import google.generativeai as genai
+from google.generativeai import caching
+import datetime
+import logging
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from google.api_core import exceptions
+logger = logging.getLogger(__name__)
+class GeminiTraderAI:
+    def __init__(self, api_key=None, model_name='models/gemini-1.5-flash-001'):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        genai.configure(api_key=self.api_key)
+        self.model_name = model_name
+        self.cache = None
+    @retry(
+        retry=retry_if_exception_type((exceptions.ResourceExhausted, exceptions.ServiceUnavailable)),
+        wait=wait_exponential(multiplier=1, min=4, max=60),
+        stop=stop_after_attempt(5)
+    )
+    def update_knowledge_base(self, history_text):
+        """Cache large historical data to avoid 429s and save costs"""
+        try:
+            # Cleanup old session caches
+            for c in caching.CachedContent.list():
+                if c.display_name == "trader_knowledge":
+                    c.delete()
+            self.cache = caching.CachedContent.create(
+                model=self.model_name,
+                display_name="trader_knowledge",
+                system_instruction="You are an expert Quant Trader. Analyze history to optimize the current BTC 15m strategy.",
+                contents=[history_text],
+                ttl=datetime.timedelta(minutes=65),
+            )
+            logger.info(f"✅ Context Cache Updated: {self.cache.name}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to update cache: {e}")
+            return False
+    @retry(
+        retry=retry_if_exception_type(exceptions.ResourceExhausted),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(3)
+    )
+    def get_decision(self, prompt):
+        """Get trading decision using cached context"""
+        if not self.cache:
+            # Fallback to no cache if not initialized
+            model = genai.GenerativeModel(self.model_name)
+            return model.generate_content(prompt).text
+        model = genai.GenerativeModel.from_cached_content(cached_content=self.cache)
+        response = model.generate_content(prompt)
+        return response.text
+</file>
+
+<file path="inspect_market.py">
+import requests
+import json
+GAMMA_API = "https://gamma-api.polymarket.com"
+def check_market():
+    # Fetch a recent BTC market slug to inspect structure
+    slug = "btc-updown-15m-1769538600" # From previous log
+    # Or just search
+    resp = requests.get(f"{GAMMA_API}/events", params={"slug": slug})
+    if resp.status_code == 200:
+        data = resp.json()
+        if data:
+            print(json.dumps(data[0], indent=2))
+        else:
+            print("No data found for slug")
+check_market()
+</file>
+
+<file path="polymarket-bot.service">
+[Unit]
+Description=Polymarket BTC 15m Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/clawd/polymarket-bot
+ExecStart=/home/ubuntu/clawd/polymarket-bot/venv/bin/python btc_15m_bot_v3.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+</file>
+
+<file path="README.md">
+# Polymarket BTC 15-Minute Trading Bot v2
+
+自动交易 Polymarket 上的比特币15分钟涨跌预测市场。
+
+## 功能
+
+- 🔌 **WebSocket 实时订阅** - 订单簿实时更新，不是轮询
+- 🔄 **自动周期切换** - 一个15分钟市场结束后自动进入下一个
+- 🔍 自动监控 BTC 15分钟市场
+- 📊 多策略支持（动量、赔率价值）
+- ⚠️ 风险管理（单笔上限、日亏损限制）
+- 📝 交易日志
+- 🔁 24小时自动运行
+
+## 安装
+
+```bash
+cd polymarket-bot
+source venv/bin/activate  # 激活虚拟环境
+```
+
+## 配置
+
+1. 复制配置文件：
+```bash
+cp .env.example .env
+```
+
+2. 编辑 `.env`，填入：
+- `PRIVATE_KEY` - 你的钱包私钥（不带0x前缀）
+- `FUNDER_ADDRESS` - 持有资金的地址
+
+## 使用
+
+测试连接：
+```bash
+python test_connection.py
+```
+
+**v1 版本**（简单轮询）：
+```bash
+python btc_15m_bot.py
+```
+
+**v2 版本**（WebSocket + 自动周期）：
+```bash
+python btc_15m_bot_v2.py
+```
+
+## 24小时后台运行
+
+方法1 - nohup：
+```bash
+nohup python btc_15m_bot_v2.py > bot.log 2>&1 &
+```
+
+方法2 - systemd 服务：
+```bash
+sudo cp polymarket-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable polymarket-bot
+sudo systemctl start polymarket-bot
+
+# 查看状态
+sudo systemctl status polymarket-bot
+
+# 查看日志
+journalctl -u polymarket-bot -f
+```
+
+## 策略说明
+
+- **momentum** - 跟随趋势，BTC 5分钟内涨超0.1%就买UP，跌就买DOWN
+- **odds_value** - 寻找定价偏差，如果 UP 价格低于 45% 就买（理论上应该是50/50）
+
+## 架构
+
+```
+┌─────────────────┐      ┌──────────────────┐
+│  CoinGecko API  │─────▶│  Price Tracker   │
+└─────────────────┘      └────────┬─────────┘
+                                  │
+┌─────────────────┐      ┌────────▼─────────┐
+│ Polymarket WSS  │─────▶│  Order Book      │
+└─────────────────┘      └────────┬─────────┘
+                                  │
+┌─────────────────┐      ┌────────▼─────────┐
+│  Gamma API      │─────▶│ Cycle Manager    │
+└─────────────────┘      └────────┬─────────┘
+                                  │
+                         ┌────────▼─────────┐
+                         │   Strategy       │
+                         └────────┬─────────┘
+                                  │
+                         ┌────────▼─────────┐
+                         │   CLOB Client    │──▶ 下单
+                         └──────────────────┘
+```
+
+## 风险提示
+
+⚠️ 这是实验性软件，可能亏损。只投入你能承受损失的资金。
+</file>
+
+<file path="repomix.config.json">
+{
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "removeComments": false,
+    "removeEmptyLines": true
+  },
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "*.jsonl",
+      "*.log",
+      "venv/",
+      "__pycache__/",
+      "*.pkl",
+      "paper_trades_*.jsonl"
+    ]
+  }
+}
+</file>
+
+<file path="test_connection.py">
+#!/usr/bin/env python3
+"""
+Test Polymarket API connection and find BTC markets (no auth needed)
+"""
+import requests
+from py_clob_client.client import ClobClient
+CLOB_HOST = "https://clob.polymarket.com"
+GAMMA_API = "https://gamma-api.polymarket.com"
+def test_clob_connection():
+    """Test basic CLOB connection"""
+    print("Testing CLOB API...")
+    client = ClobClient(CLOB_HOST)  # Read-only, no auth
+    ok = client.get_ok()
+    server_time = client.get_server_time()
+    print(f"  ✓ CLOB OK: {ok}")
+    print(f"  ✓ Server time: {server_time}")
+    return True
+def find_btc_markets():
+    """Find active BTC 15-min markets"""
+    print("\nSearching for BTC 15-minute markets...")
+    resp = requests.get(
+        f"{GAMMA_API}/markets",
+        params={
+            "active": "true",
+            "closed": "false",
+            "limit": 200
+        },
+        timeout=15
+    )
+    resp.raise_for_status()
+    markets = resp.json()
+    btc_markets = []
+    for market in markets:
+        question = market.get("question", "").lower()
+        if "bitcoin" in question and ("15" in question or "15m" in question):
+            btc_markets.append(market)
+    if btc_markets:
+        print(f"  ✓ Found {len(btc_markets)} BTC market(s):")
+        for m in btc_markets[:3]:  # Show first 3
+            print(f"    - {m.get('question', 'Unknown')}")
+            print(f"      Prices: {m.get('outcomePrices', 'N/A')}")
+            print(f"      Volume: ${float(m.get('volume', 0)):,.2f}")
+            print(f"      End: {m.get('endDate', 'N/A')}")
+    else:
+        print("  ⚠ No active BTC 15-min markets found right now")
+        print("    (They might be between intervals)")
+    return btc_markets
+def get_btc_price():
+    """Get current BTC price"""
+    print("\nGetting BTC price...")
+    resp = requests.get(
+        "https://api.coingecko.com/api/v3/simple/price",
+        params={"ids": "bitcoin", "vs_currencies": "usd"},
+        timeout=10
+    )
+    resp.raise_for_status()
+    price = resp.json()["bitcoin"]["usd"]
+    print(f"  ✓ BTC/USD: ${price:,.2f}")
+    return price
+def main():
+    print("=" * 50)
+    print("Polymarket BTC Bot - Connection Test")
+    print("=" * 50)
+    try:
+        test_clob_connection()
+        get_btc_price()
+        find_btc_markets()
+        print("\n" + "=" * 50)
+        print("✓ All tests passed! Ready to trade.")
+        print("=" * 50)
+    except Exception as e:
+        print(f"\n✗ Error: {e}")
+        return 1
+    return 0
+if __name__ == "__main__":
+    exit(main())
+</file>
+
+<file path="test_order.py">
+#!/usr/bin/env python3
+"""测试下单和撤单系统"""
+import os
+import json
+import time
+import requests
+from datetime import datetime, timezone
+from dotenv import load_dotenv
+from py_clob_client.client import ClobClient
+from py_clob_client.clob_types import OrderArgs, OrderType
+from py_clob_client.order_builder.constants import BUY
+load_dotenv()
+CLOB_HOST = "https://clob.polymarket.com"
+GAMMA_API = "https://gamma-api.polymarket.com"
+CHAIN_ID = 137
+def get_current_market():
+    """获取当前活跃的 BTC 15分钟市场"""
+    now = datetime.now(timezone.utc)
+    current_ts = int(now.timestamp())
+    # 当前和下一个周期
+    for offset in [0, 900]:
+        ts = ((current_ts // 900) * 900) + offset
+        slug = f"btc-updown-15m-{ts}"
+        try:
+            resp = requests.get(f"{GAMMA_API}/events?slug={slug}", timeout=10)
+            events = resp.json()
+            if events and not events[0].get("closed", True):
+                event = events[0]
+                markets = event.get("markets", [])
+                if markets and markets[0].get("acceptingOrders", False):
+                    market = markets[0]
+                    token_ids = json.loads(market.get("clobTokenIds", "[]"))
+                    outcomes = json.loads(market.get("outcomes", '["Up", "Down"]'))
+                    # 确定 UP token
+                    if outcomes[0].lower() == "up":
+                        token_up = token_ids[0]
+                    else:
+                        token_up = token_ids[1]
+                    return {
+                        "title": event.get("title", ""),
+                        "end": market.get("endDate", ""),
+                        "token_id": token_up,
+                        "condition_id": market.get("conditionId", "")
+                    }
+        except Exception as e:
+            print(f"查询 {slug} 失败: {e}")
+    return None
+def main():
+    print("=" * 60)
+    print("Polymarket 下单/撤单测试")
+    print("=" * 60)
+    # 初始化客户端
+    private_key = os.getenv("PRIVATE_KEY")
+    funder = os.getenv("FUNDER_ADDRESS")
+    print(f"\n钱包: {funder[:10]}...{funder[-6:]}")
+    client = ClobClient(
+        CLOB_HOST,
+        key=private_key,
+        chain_id=CHAIN_ID,
+        signature_type=2,  # Proxy wallet
+        funder=funder
+    )
+    client.set_api_creds(client.create_or_derive_api_creds())
+    print("✓ 客户端初始化成功")
+    # 获取当前市场
+    print("\n查找活跃市场...")
+    market = get_current_market()
+    if not market:
+        print("✗ 没有找到活跃的 BTC 15分钟市场")
+        print("  可能在周期切换中，请稍后再试")
+        return
+    print(f"✓ 找到市场: {market['title']}")
+    print(f"  结束时间: {market['end']}")
+    print(f"  Token ID: {market['token_id'][:20]}...")
+    # 查看当前订单
+    print("\n当前开放订单:")
+    try:
+        orders = client.get_orders()
+        print(f"  订单数: {len(orders) if orders else 0}")
+        if orders:
+            for o in orders[:3]:
+                print(f"    - {o}")
+    except Exception as e:
+        print(f"  获取订单失败: {e}")
+    # 下限价单 @ $0.01
+    print("\n" + "-" * 40)
+    print("测试下单: BUY UP @ $0.01, 数量 5 shares")
+    print("-" * 40)
+    try:
+        order = OrderArgs(
+            token_id=market["token_id"],
+            price=0.01,  # 最低价格
+            size=5.0,    # 最小数量
+            side=BUY
+        )
+        signed_order = client.create_order(order)
+        print(f"✓ 订单已签名")
+        resp = client.post_order(signed_order, OrderType.GTC)
+        print(f"✓ 订单已提交!")
+        print(f"  响应: {resp}")
+        order_id = resp.get("orderID") or resp.get("order_id") or resp.get("id")
+        if order_id:
+            print(f"\n订单 ID: {order_id}")
+            # 等待一下
+            time.sleep(2)
+            # 查看订单状态
+            print("\n检查订单状态...")
+            orders = client.get_orders()
+            found = False
+            for o in orders or []:
+                if str(o.get("id")) == str(order_id) or str(o.get("order_id")) == str(order_id):
+                    print(f"  ✓ 订单在列表中")
+                    found = True
+                    break
+            if not found and orders:
+                print(f"  订单列表: {[o.get('id') for o in orders[:5]]}")
+            # 撤单
+            print("\n" + "-" * 40)
+            print("测试撤单...")
+            print("-" * 40)
+            try:
+                cancel_resp = client.cancel(order_id=order_id)
+                print(f"✓ 撤单成功!")
+                print(f"  响应: {cancel_resp}")
+            except Exception as e:
+                print(f"✗ 撤单失败: {e}")
+                # 尝试取消所有订单
+                print("\n尝试取消所有订单...")
+                try:
+                    cancel_all = client.cancel_all()
+                    print(f"✓ 取消所有订单: {cancel_all}")
+                except Exception as e2:
+                    print(f"✗ 取消所有失败: {e2}")
+        else:
+            print(f"  无法获取订单 ID，响应: {resp}")
+    except Exception as e:
+        print(f"✗ 下单失败: {e}")
+        # 如果是余额问题，给出建议
+        if "balance" in str(e).lower() or "allowance" in str(e).lower():
+            print("\n建议: 余额不足或未授权")
+            print("  1. 在 Polymarket 网站存入更多 USDC")
+            print("  2. 或者在网站上手动下一笔单激活授权")
+    # 最后检查订单
+    print("\n" + "=" * 60)
+    print("最终订单状态:")
+    try:
+        final_orders = client.get_orders()
+        print(f"  开放订单数: {len(final_orders) if final_orders else 0}")
+    except Exception as e:
+        print(f"  获取失败: {e}")
+    print("=" * 60)
+    print("测试完成")
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="train_ml.py">
+#!/usr/bin/env python3
+"""
+Polymarket Machine Learning Training Script
+- Reads paper_trades.jsonl (historical data)
+- Trains a Random Forest Classifier to predict WIN/LOSS
+- Saves the model to be used by V4 bot
+"""
+import json
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+import joblib
+import os
+DATA_FILE = "polymarket-bot/paper_trades.jsonl"
+MODEL_FILE = "polymarket-bot/ml_model_v1.pkl"
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        print(f"No data file found at {DATA_FILE}")
+        return None
+    data = []
+    with open(DATA_FILE, "r") as f:
+        for line in f:
+            try:
+                record = json.loads(line)
+                # We only want SETTLED records which have a result
+                if record.get("type") == "SETTLED":
+                    data.append(record)
+            except:
+                pass
+    if not data:
+        print("No settled trades found to train on.")
+        return None
+    df = pd.DataFrame(data)
+    return df
+def feature_engineering(df):
+    """
+    Convert raw trade data into ML features
+    Target: 1 if WIN, 0 if LOSS
+    """
+    # Create target variable
+    df['target'] = df['result'].apply(lambda x: 1 if x == 'WIN' else 0)
+    # Features to use:
+    # 1. Entry Price (Cost basis) - Lower usually means better odds?
+    # 2. Direction (Encoded: UP=1, DOWN=0)
+    # 3. Hour of day (Maybe some hours are better?)
+    df['direction_code'] = df['direction'].apply(lambda x: 1 if x == 'UP' else 0)
+    # Parse timestamp
+    df['datetime'] = pd.to_datetime(df['time'])
+    df['hour'] = df['datetime'].dt.hour
+    # Select features for training
+    features = ['entry_price', 'direction_code', 'hour']
+    X = df[features]
+    y = df['target']
+    return X, y
+def train_model():
+    print("Loading data...")
+    df = load_data()
+    if df is None: return
+    print(f"Found {len(df)} settled trades.")
+    if len(df) < 10:
+        print("⚠️ Data insufficient for ML training (need >10 trades).")
+        print("Please let V3 bot run longer to accumulate data.")
+        return
+    print("Engineering features...")
+    X, y = feature_engineering(df)
+    # Split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    print("Training Random Forest Classifier...")
+    clf = RandomForestClassifier(n_estimators=100, random_state=42)
+    clf.fit(X_train, y_train)
+    # Evaluate
+    y_pred = clf.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f"\n🎯 Model Accuracy: {accuracy:.2%}")
+    print("\nClassification Report:")
+    print(classification_report(y_test, y_pred))
+    # Save
+    print(f"Saving model to {MODEL_FILE}...")
+    joblib.dump(clf, MODEL_FILE)
+    print("✅ Done.")
+if __name__ == "__main__":
+    train_model()
+</file>
+
+</files>

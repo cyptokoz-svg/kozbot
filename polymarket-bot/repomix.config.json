@@ -1,0 +1,20 @@
+{
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "removeComments": false,
+    "removeEmptyLines": true
+  },
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "*.jsonl",
+      "*.log",
+      "venv/",
+      "__pycache__/",
+      "*.pkl",
+      "paper_trades_*.jsonl"
+    ]
+  }
+}
