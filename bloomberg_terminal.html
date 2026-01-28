@@ -3,12 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CLAWDBOT // QUANT TERMINAL</title>
+    <title>CLAWD QUANT // TERMINAL</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <style>
-        /* ... existing styles ... */
+        body {
+            background-color: #000000;
+            color: #ff9900;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+        }
+        .bb-box {
+            border: 1px solid #333;
+            background: #050505;
+            position: relative;
+        }
+        .bb-header {
+            background: #ff9900;
+            color: black;
+            padding: 2px 8px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            display: inline-block;
+        }
         .grid-layout {
             display: flex;
             flex-direction: column;
@@ -24,7 +42,12 @@
             }
             .col-span-3 { grid-column: span 3; }
         }
-        /* ... */
+        
+        .blink { animation: blinker 1s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0; } }
+        
+        .val-up { color: #00ff00 !important; }
+        .val-down { color: #ff3333 !important; }
     </style>
 </head>
 <body>
@@ -36,12 +59,11 @@
                 <span class="text-white">CLAWD</span><span class="text-[#ff9900]">BOT</span> <span class="text-xs align-top">量化终端 V3.1</span>
             </div>
             <div class="hidden md:flex gap-8 text-sm">
-                <div>BTC <span class="val-up" id="btc-price">---</span></div>
                 <div>状态 <span class="text-green-500">运行中</span></div>
             </div>
             <div class="text-right text-xs text-gray-500">
                 系统在线 <span class="blink">●</span><br>
-                <span id="last-update">--:--:-- UTC</span>
+                <span id="last-update">等待数据...</span>
             </div>
         </div>
 
@@ -103,19 +125,37 @@
     </div>
 
     <script>
-        // Fetch Real Data
         async function updateData() {
             try {
-                // Fetch from the same repo's public folder
-                const res = await fetch('public/data.json?t=' + new Date().getTime());
+                // Multi-path fetch strategy for GitHub Pages
+                let res;
+                const paths = [
+                    'public/data.json',
+                    '/kozbot/public/data.json', 
+                    './public/data.json'
+                ];
+                
+                for (const p of paths) {
+                    try {
+                        const r = await fetch(p + '?t=' + Date.now());
+                        if (r.ok) { res = r; break; }
+                    } catch(e){}
+                }
+                
+                if (!res || !res.ok) throw new Error("无法读取 data.json");
+                
                 const data = await res.json();
                 
-                // Update DOM
-                document.getElementById('net-pnl').innerText = data.stats.netPnL;
-                document.getElementById('win-rate').innerText = data.stats.winRate;
-                document.getElementById('pf').innerText = data.stats.profitFactor;
-                document.getElementById('total-trades').innerText = data.stats.totalTrades;
-                document.getElementById('last-update').innerText = data.updatedAt;
+                const setTxt = (id, val) => {
+                    const el = document.getElementById(id);
+                    if(el) el.innerText = val;
+                };
+
+                setTxt('net-pnl', data.stats.netPnL);
+                setTxt('win-rate', data.stats.winRate);
+                setTxt('pf', data.stats.profitFactor);
+                setTxt('total-trades', data.stats.totalTrades);
+                setTxt('last-update', data.updatedAt);
                 
                 // Update Table
                 const tbody = document.getElementById('trade-list');
@@ -129,12 +169,18 @@
                         <td class="p-1 text-right ${color}">${(parseFloat(t.pnl)*100).toFixed(1)}%</td>
                     </tr>`;
                 }).join('');
+                
+                // Update Direction
+                if(data.recentTrades.length > 0) {
+                    setTxt('last-dir', data.recentTrades[0].direction);
+                }
 
                 // Update Chart
                 updateChart(data.chartData);
                 
             } catch (e) {
                 console.error("Data Load Error:", e);
+                document.getElementById('last-update').innerText = "❌ " + e.message;
             }
         }
 
@@ -172,7 +218,8 @@
             });
         }
 
-        // Init
         updateData();
-        setInterval(updateData, 60000); // Auto-refresh every minute
+        setInterval(updateData, 30000);
     </script>
+</body>
+</html>
