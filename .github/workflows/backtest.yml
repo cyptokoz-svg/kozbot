@@ -23,13 +23,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Only install core logic deps, skip heavy ML stuff for quick CI
-          pip install requests websockets py-clob-client
+          # Only core logic, NO HEAVY LIBS needed for backtest
+          # pip install requests websockets py-clob-client
 
       - name: Run Backtest Simulation
         run: |
           cd polymarket-bot
-          # Run backtest with default parameters
+          # Run backtest (will use sample_trades.json)
           python3 backtest_engine.py
           
       - name: Check Code Style
