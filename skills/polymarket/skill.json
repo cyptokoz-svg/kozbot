@@ -1,0 +1,9 @@
+{
+  "name": "polymarket",
+  "description": "Fetch markets, prices, and order books from Polymarket.",
+  "scripts": {
+    "search": "python3 skills/polymarket/search.py",
+    "get_market": "python3 skills/polymarket/get_market.py",
+    "get_book": "python3 skills/polymarket/get_book.py"
+  }
+}

@@ -533,6 +533,14 @@ class PolymarketBotV3:
             # Check Stop Loss for existing positions
             await self.check_stop_loss(market)
 
+            # --- [New] Cooldown Period Filter ---
+            # Don't trade in the first 15 seconds of the market cycle to avoid opening noise
+            time_since_start = (datetime.now(timezone.utc) - market.start_time).total_seconds()
+            if time_since_start < 15:
+                logger.info(f"⏳ 开盘冷静期: 等待趋势确认 ({int(time_since_start)}/15s) - 跳过")
+                await asyncio.sleep(2)
+                continue
+
             # If within safety margin (ambiguous zone), force neutral probability or skip
             if abs(diff) < safety_margin:
                 logger.info(f"价格差异 ${diff:.1f} 在安全边际(${safety_margin:.1f}, {self.safety_margin_pct:.2%})内 - 跳过")

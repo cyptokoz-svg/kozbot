@@ -4,8 +4,17 @@ import os
 from datetime import datetime, timezone
 
 # Configuration (Add these to your env or config.json)
-NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+CONFIG_FILE = "polymarket-bot/config.json"
+
+def load_config():
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            return json.load(f)
+    except: return {}
+
+conf = load_config()
+NOTION_TOKEN = conf.get("notion_token")
+DATABASE_ID = conf.get("notion_database_id")
 LOG_FILE = "polymarket-bot/paper_trades.jsonl"
 
 def get_daily_stats():

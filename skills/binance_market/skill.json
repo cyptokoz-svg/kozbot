@@ -1,0 +1,8 @@
+{
+  "name": "binance_market",
+  "description": "Fetch Funding Rate, Long/Short Ratio, and Open Interest from Binance Futures.",
+  "scripts": {
+    "funding": "python3 skills/binance_market/funding.py",
+    "ratio": "python3 skills/binance_market/ratio.py"
+  }
+}

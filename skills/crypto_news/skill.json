@@ -1,0 +1,7 @@
+{
+  "name": "crypto_news",
+  "description": "Fetch latest crypto news titles.",
+  "scripts": {
+    "headlines": "python3 skills/crypto_news/headlines.py"
+  }
+}
