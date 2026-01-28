@@ -12,7 +12,7 @@ import subprocess
 from datetime import datetime, timezone
 
 LOG_FILE = "polymarket-bot/paper_trades.jsonl"
-OUTPUT_FILE = "polymarket-web/public/data.json"
+OUTPUT_FILE = "public/data.json"
 
 def generate_web_data():
     trades = []
