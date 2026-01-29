@@ -1,10 +1,10 @@
 {
-  "updatedAt": "02:19:27 UTC",
+  "updatedAt": "02:24:28 UTC",
   "stats": {
-    "netPnL": "+8.56 R",
-    "winRate": "52.5%",
-    "profitFactor": "1.58",
-    "totalTrades": 165
+    "netPnL": "+7.72 R",
+    "winRate": "51.2%",
+    "profitFactor": "1.50",
+    "totalTrades": 168
   },
   "chartData": [
     {
@@ -42,9 +42,44 @@
     {
       "time": "02:03",
       "pnl": -0.81
+    },
+    {
+      "time": "02:19",
+      "pnl": -1.26
+    },
+    {
+      "time": "02:23",
+      "pnl": -1.65
     }
   ],
   "recentTrades": [
+    {
+      "time": "2026-01-29T02:23:18.626730+00:00",
+      "type": "STOP_LOSS",
+      "market": "btc-updown-15m-1769652900",
+      "direction": "DOWN",
+      "exit_price": 0.41,
+      "pnl": -0.39705882352941185,
+      "shortTime": "02:23"
+    },
+    {
+      "time": "2026-01-29T02:21:28.197712",
+      "type": "V3_SMART",
+      "direction": "DOWN",
+      "price": 0.68,
+      "strike": 88690.26,
+      "fee": 0.03,
+      "shortTime": "02:21"
+    },
+    {
+      "time": "2026-01-29T02:19:42.648194+00:00",
+      "type": "STOP_LOSS",
+      "market": "btc-updown-15m-1769652900",
+      "direction": "DOWN",
+      "exit_price": 0.41,
+      "pnl": -0.445945945945946,
+      "shortTime": "02:19"
+    },
     {
       "time": "2026-01-29T02:17:58.471893",
       "type": "V3_SMART",
@@ -110,33 +145,6 @@
       "strike": 88836.0,
       "fee": 0.03,
       "shortTime": "01:47"
-    },
-    {
-      "time": "2026-01-29T01:42:18.105305+00:00",
-      "type": "STOP_LOSS",
-      "market": "btc-updown-15m-1769650200",
-      "direction": "DOWN",
-      "exit_price": 0.35,
-      "pnl": -0.39655172413793105,
-      "shortTime": "01:42"
-    },
-    {
-      "time": "2026-01-29T01:40:34.329764",
-      "type": "V3_SMART",
-      "direction": "DOWN",
-      "price": 0.58,
-      "strike": 88831.5,
-      "fee": 0.03,
-      "shortTime": "01:40"
-    },
-    {
-      "time": "2026-01-29T01:38:46.945618+00:00",
-      "type": "STOP_LOSS",
-      "market": "btc-updown-15m-1769650200",
-      "direction": "DOWN",
-      "exit_price": 0.46,
-      "pnl": -0.35211267605633795,
-      "shortTime": "01:38"
     }
   ]
 }
