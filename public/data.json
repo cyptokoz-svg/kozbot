@@ -1,10 +1,10 @@
 {
-  "updatedAt": "08:45:52 UTC",
+  "updatedAt": "08:50:53 UTC",
   "stats": {
-    "netPnL": "+8.92 R",
-    "winRate": "52.1%",
-    "profitFactor": "1.50",
-    "totalTrades": 197
+    "netPnL": "+8.53 R",
+    "winRate": "51.5%",
+    "profitFactor": "1.47",
+    "totalTrades": 200
   },
   "chartData": [
     {
@@ -106,9 +106,40 @@
     {
       "time": "08:44",
       "pnl": -0.45
+    },
+    {
+      "time": "08:49",
+      "pnl": -0.84
     }
   ],
   "recentTrades": [
+    {
+      "time": "2026-01-29T08:49:32.948720",
+      "type": "V3_SMART",
+      "direction": "DOWN",
+      "price": 0.63,
+      "strike": 88125.2,
+      "fee": 0.03,
+      "shortTime": "08:49"
+    },
+    {
+      "time": "2026-01-29T08:49:32.715756+00:00",
+      "type": "STOP_LOSS",
+      "market": "btc-updown-15m-1769676300",
+      "direction": "UP",
+      "exit_price": 0.38,
+      "pnl": -0.3870967741935484,
+      "shortTime": "08:49"
+    },
+    {
+      "time": "2026-01-29T08:45:58.070410",
+      "type": "V3_SMART",
+      "direction": "UP",
+      "price": 0.62,
+      "strike": 88125.2,
+      "fee": 0.03,
+      "shortTime": "08:45"
+    },
     {
       "time": "2026-01-29T08:44:36.863959+00:00",
       "type": "SETTLED",
@@ -180,33 +211,6 @@
       "exit_price": 0.46,
       "pnl": -0.36111111111111105,
       "shortTime": "05:07"
-    },
-    {
-      "time": "2026-01-29T05:04:55.483060",
-      "type": "V3_SMART",
-      "direction": "UP",
-      "price": 0.72,
-      "strike": 88315.2,
-      "fee": 0.03,
-      "shortTime": "05:04"
-    },
-    {
-      "time": "2026-01-29T04:26:20.214458+00:00",
-      "type": "STOP_LOSS",
-      "market": "btc-updown-15m-1769660100",
-      "direction": "DOWN",
-      "exit_price": 0.38,
-      "pnl": -0.45714285714285713,
-      "shortTime": "04:26"
-    },
-    {
-      "time": "2026-01-29T04:22:27.040066",
-      "type": "V3_SMART",
-      "direction": "DOWN",
-      "price": 0.7,
-      "strike": 87980.02,
-      "fee": 0.03,
-      "shortTime": "04:22"
     }
   ]
 }
