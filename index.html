@@ -1,206 +1,28 @@
-    <title>POLYMARKET ARBITRAGE BOT // TERMINAL</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="30"> <!-- Auto-refresh every 30s -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S. Command</title>
     <style>
-        :root {
-            --bg-color: #020408;
-            --panel-bg: #050a14;
-            --border-color: #1a2634;
-            --text-main: #576b85;
-            --text-highlight: #c5d4e8;
-            --accent-green: #00ff9d;
-            --accent-red: #ff3333;
-            --accent-blue: #00f0ff;
-        }
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            font-family: 'Fira Code', monospace;
-            font-size: 12px;
-            overflow: hidden;
-        }
-        .panel {
-            background: var(--panel-bg);
-            border: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-        }
-        .header-val {
-            color: var(--accent-green);
-            font-size: 24px;
-            font-weight: bold;
-            text-shadow: 0 0 10px rgba(0, 255, 157, 0.2);
-        }
-        .header-label {
-            color: var(--text-main);
-            text-transform: uppercase;
-            font-size: 10px;
-            letter-spacing: 1px;
-        }
-        .table-head {
-            color: var(--text-main);
-            text-transform: uppercase;
-            border-bottom: 1px solid var(--border-color);
-            padding: 8px;
-        }
-        .val-up { color: var(--accent-green); }
-        .val-down { color: var(--accent-red); }
-        .val-blue { color: var(--accent-blue); }
-        
-        .code-block {
-            font-family: 'Fira Code', monospace;
-            color: #3d4e61;
-            font-size: 10px;
-            line-height: 1.4;
-        }
-        
-        /* Grid Layout */
-        .grid-container {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            grid-template-rows: 80px 1fr 200px;
-            gap: 4px;
-            height: 100vh;
-            padding: 4px;
-        }
-        @media (max-width: 1024px) {
-            .grid-container { display: flex; flex-direction: column; }
-        }
+        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; }
+        h1 { border-bottom: 2px solid #0f0; padding-bottom: 10px; }
+        .status { font-size: 2em; font-weight: bold; color: #0f0; }
+        .log { margin-top: 20px; padding: 10px; border: 1px solid #333; background: #050505; }
+        .timestamp { color: #555; font-size: 0.8em; }
     </style>
 </head>
 <body>
-
-    <div class="grid-container">
-        <!-- 1. Top Bar: Account Stats -->
-        <div class="panel col-span-2 flex flex-row items-center justify-between px-8">
-            <div>
-                <div class="header-label">ACCOUNT</div>
-                <div class="text-xl text-white font-bold">PRO-TRADER</div>
-            </div>
-            <div>
-                <div class="header-label">TOTAL PROFIT</div>
-                <div class="header-val" id="net-pnl">$0.00</div>
-            </div>
-            <div>
-                <div class="header-label">PREDICTIONS</div>
-                <div class="text-xl text-white" id="total-trades">0</div>
-            </div>
-            <div>
-                <div class="header-label">WIN RATE</div>
-                <div class="text-xl val-blue" id="win-rate">0%</div>
-            </div>
-        </div>
-
-        <!-- 2. Left Main: Trade Feed -->
-        <div class="panel row-span-2 overflow-hidden">
-            <div class="flex justify-between items-center p-2 border-b border-[#1a2634] bg-[#080f1c]">
-                <span class="text-white font-bold">▶ POLYMARKET TRADES</span>
-                <span class="text-xs animate-pulse text-green-500">● LIVE</span>
-            </div>
-            <div class="overflow-y-auto flex-1 p-2">
-                <table class="w-full text-left border-collapse">
-                    <thead class="text-[#3d4e61] sticky top-0 bg-[#050a14]">
-                        <tr>
-                            <th class="p-2">TIME</th>
-                            <th class="p-2">MARKET</th>
-                            <th class="p-2">SIDE</th>
-                            <th class="p-2">PRICE</th>
-                            <th class="p-2 text-right">P&L</th>
-                        </tr>
-                    </thead>
-                    <tbody id="trade-list" class="text-[#c5d4e8]">
-                        <!-- JS populated -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- 3. Right Top: Source/Code (Visual Candy) -->
-        <div class="panel p-4 overflow-hidden hidden lg:flex">
-            <div class="text-[#3d4e61] mb-2 border-b border-[#1a2634] pb-1">▶ SOURCE :: STRATEGY_V3.1.PY</div>
-            <div class="code-block whitespace-pre">
-class PolymarketBot:
-    def scan_markets(self):
-        # Calculating Order Book Imbalance...
-        obi = self.get_depth(limit=20)
-        edge = self.calc_probability()
-        
-        if edge > MIN_EDGE and obi > 1.5:
-            self.execute("UP")
-        elif edge < -MIN_EDGE and obi < 0.6:
-            self.execute("DOWN")
-            
-    # Auto-Hedging enabled
-    # Latency: 42ms
-            </div>
-        </div>
-
-        <!-- 4. Right Bottom: Terminal Logs -->
-        <div class="panel p-2 bg-black font-mono text-xs overflow-hidden">
-            <div class="text-[#3d4e61] mb-1">▶ TERMINAL</div>
-            <div id="terminal-logs" class="space-y-1 h-full overflow-y-auto p-1 text-gray-400">
-                <div>[SYSTEM] Initializing V3.1 Kernel...</div>
-                <div>[CONNECT] wss://clob.polymarket.com connected.</div>
-                <div class="text-green-500">[READY] Waiting for signals...</div>
-            </div>
-        </div>
+    <h1>J.A.R.V.I.S. MONITOR</h1>
+    <div class="timestamp">Last Updated: 2026-01-29 12:10:37 UTC</div>
+    <br>
+    <div>SYSTEM MODE: <span class="status">LIVE TRADING</span></div>
+    <div>BALANCE: <span style="color:white">$2.78 (Proxy)</span></div>
+    
+    <div class="log">
+        <h3>>> LATEST TELEMETRY</h3>
+        <p>2026-01-29 12:10:00,935 - INFO - 价格差异 $204.7 在安全边际($52.7, 0.06%)内 - 跳过</p>
     </div>
-
-    <script>
-        // Data Fetching Logic
-        async function updateData() {
-            try {
-                // Multi-path fetch
-                let res;
-                const paths = ['public/data.json', '/kozbot/public/data.json', './data.json'];
-                for (const p of paths) {
-                    try {
-                        const r = await fetch(p + '?t=' + Date.now());
-                        if (r.ok) { res = r; break; }
-                    } catch(e){}
-                }
-                
-                if (!res || !res.ok) throw new Error("Data Sync Pending...");
-                const data = await res.json();
-                
-                // Update Header
-                document.getElementById('net-pnl').innerText = data.stats.netPnL;
-                document.getElementById('total-trades').innerText = data.stats.totalTrades;
-                document.getElementById('win-rate').innerText = data.stats.winRate;
-                
-                // Update Trade List
-                const tbody = document.getElementById('trade-list');
-                tbody.innerHTML = data.recentTrades.map(t => {
-                    const isWin = parseFloat(t.pnl) > 0;
-                    const pnlText = (parseFloat(t.pnl)*100).toFixed(1) + "%";
-                    const pnlClass = isWin ? "text-[#00ff9d]" : "text-[#ff3333]";
-                    const sideClass = t.direction === "UP" ? "text-[#00ff9d]" : "text-[#ff3333]";
-                    
-                    return `<tr class="border-b border-[#111] hover:bg-[#0a1220]">
-                        <td class="p-2 text-gray-500">${t.shortTime}</td>
-                        <td class="p-2 text-white">Bitcoin 15m</td>
-                        <td class="p-2 ${sideClass}">${t.direction}</td>
-                        <td class="p-2 text-gray-400">${t.price || t.entry_price}¢</td>
-                        <td class="p-2 text-right ${pnlClass}">${isWin ? '+' : ''}${pnlText}</td>
-                    </tr>`;
-                }).join('');
-                
-                // Update Terminal Log (Mocking real-time feel)
-                const logDiv = document.getElementById('terminal-logs');
-                logDiv.innerHTML = `
-                    <div class="text-gray-500">[SYNC] Data updated at ${data.updatedAt}</div>
-                    <div class="text-blue-400">[SCAN] Scanning BTC 15m market...</div>
-                    <div class="text-gray-600">[OBI] Order Book Imbalance: Normal</div>
-                ` + logDiv.innerHTML;
-                
-            } catch (e) {
-                console.log(e);
-            }
-        }
-
-        updateData();
-        setInterval(updateData, 30000);
-    </script>
 </body>
 </html>
