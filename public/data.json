@@ -1,10 +1,10 @@
 {
-  "updatedAt": "03:19:39 UTC",
+  "updatedAt": "03:24:40 UTC",
   "stats": {
     "netPnL": "+9.20 R",
     "winRate": "51.7%",
     "profitFactor": "1.56",
-    "totalTrades": 178
+    "totalTrades": 179
   },
   "chartData": [
     {
@@ -73,6 +73,15 @@
     }
   ],
   "recentTrades": [
+    {
+      "time": "2026-01-29T03:22:16.506012",
+      "type": "V3_SMART",
+      "direction": "UP",
+      "price": 0.54,
+      "strike": 88081.77,
+      "fee": 0.03,
+      "shortTime": "03:22"
+    },
     {
       "time": "2026-01-29T03:19:21.371514+00:00",
       "type": "STOP_LOSS",
@@ -162,15 +171,6 @@
       "pnl": 0.923076923076923,
       "result": "WIN",
       "shortTime": "02:44"
-    },
-    {
-      "time": "2026-01-29T02:30:30.611697",
-      "type": "V3_SMART",
-      "direction": "DOWN",
-      "price": 0.52,
-      "strike": 88611.14,
-      "fee": 0.03,
-      "shortTime": "02:30"
     }
   ]
 }
