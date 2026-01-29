@@ -1,10 +1,10 @@
 {
-  "updatedAt": "08:25:47 UTC",
+  "updatedAt": "08:30:48 UTC",
   "stats": {
-    "netPnL": "+8.45 R",
-    "winRate": "51.1%",
-    "profitFactor": "1.47",
-    "totalTrades": 194
+    "netPnL": "+8.68 R",
+    "winRate": "51.6%",
+    "profitFactor": "1.48",
+    "totalTrades": 195
   },
   "chartData": [
     {
@@ -98,9 +98,25 @@
     {
       "time": "05:44",
       "pnl": -0.92
+    },
+    {
+      "time": "08:29",
+      "pnl": -0.69
     }
   ],
   "recentTrades": [
+    {
+      "time": "2026-01-29T08:29:36.500241+00:00",
+      "type": "SETTLED",
+      "market": "btc-updown-15m-1769674500",
+      "condition_id": "0xfdf7a042eb0fc45cce53600aed874cd25a84ab1b81f751d2ef748800cf42c2b8",
+      "direction": "UP",
+      "entry_price": 0.81,
+      "exit_price": 1.0,
+      "pnl": 0.23456790123456783,
+      "result": "WIN",
+      "shortTime": "08:29"
+    },
     {
       "time": "2026-01-29T08:22:46.342806",
       "type": "V3_SMART",
@@ -187,15 +203,6 @@
       "strike": 88128.33,
       "fee": 0.03,
       "shortTime": "03:50"
-    },
-    {
-      "time": "2026-01-29T03:47:45.366001",
-      "type": "V3_SMART",
-      "direction": "DOWN",
-      "price": 0.71,
-      "strike": 88128.33,
-      "fee": 0.03,
-      "shortTime": "03:47"
     }
   ]
 }
