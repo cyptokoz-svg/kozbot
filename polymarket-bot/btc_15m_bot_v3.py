@@ -754,6 +754,8 @@ class PolymarketBotV3:
                         pricing_power = liq_data.get('bid_depth', 0) - liq_data.get('ask_depth', 0)
                         price_time = (current_btc - market.strike_price) * (16 - time_left)
 
+                        # [Fix] Dynamic feature set to handle model versions
+                        # Model expects 13 features, remove newest 2 for compatibility
                         X_df = pd.DataFrame([{
                             'direction_code': 1, 
                             'hour': now_utc.hour,
@@ -769,10 +771,9 @@ class PolymarketBotV3:
                             # [Added for V2]
                             'strike': market.strike_price,
                             'diff_from_strike': current_btc - market.strike_price,
-                            'minutes_remaining': time_left,
-                            # [Pricing/Time V3]
-                            'price_time_interaction': price_time,
-                            'pricing_power_index': pricing_power
+                            'minutes_remaining': time_left
+                            # Note: Removed 'price_time_interaction' and 'pricing_power_index' 
+                            # to maintain compatibility with v2 model (13 features)
                         }])
                         
                         # 4. Predict
