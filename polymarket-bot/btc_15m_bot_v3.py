@@ -819,6 +819,11 @@ class PolymarketBotV3:
                 edge_up = prob_up - mkt_up - fee
                 edge_down = prob_down - mkt_down - fee
                 
+                # [Fix] Edge 极端值截断保护 (日志记录时也应用)
+                EDGE_LIMIT = 0.50
+                edge_up = max(min(edge_up, EDGE_LIMIT), -EDGE_LIMIT)
+                edge_down = max(min(edge_down, EDGE_LIMIT), -EDGE_LIMIT)
+                
                 log_msg = (
                     f"剩余 {time_left:.1f}m | BTC: ${current_btc:.1f} (Diff: ${diff:+.1f}) | "
                     f"Poly UP: ${mkt_up:.2f} | Prob UP: {prob_up:.1%} | OBI: {obi:.2f}x | "
@@ -846,6 +851,15 @@ class PolymarketBotV3:
                 
                 edge_up = prob_up - mkt_up - fee
                 edge_down = prob_down - mkt_down - fee
+                
+                # [Fix] Edge 极端值截断保护 (防止 ±80%+ 异常信号)
+                EDGE_LIMIT = 0.50  # 限制在 ±50%
+                if abs(edge_up) > EDGE_LIMIT:
+                    logger.warning(f"⚠️ Edge UP 极端值截断: {edge_up:+.1%} → {max(min(edge_up, EDGE_LIMIT), -EDGE_LIMIT):+.1%}")
+                    edge_up = max(min(edge_up, EDGE_LIMIT), -EDGE_LIMIT)
+                if abs(edge_down) > EDGE_LIMIT:
+                    logger.warning(f"⚠️ Edge DOWN 极端值截断: {edge_down:+.1%} → {max(min(edge_down, EDGE_LIMIT), -EDGE_LIMIT):+.1%}")
+                    edge_down = max(min(edge_down, EDGE_LIMIT), -EDGE_LIMIT)
                 
                 # --- OBI Filter Integration ---
                 obi = BinanceData.get_order_book_imbalance()
