@@ -1,0 +1,13 @@
+# Secrets
+config.json
+.env
+
+# Cache
+candle_cache/
+*.pkl
+
+# Logs
+*.log
+
+# Virtual env
+venv/
