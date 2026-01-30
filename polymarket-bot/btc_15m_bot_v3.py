@@ -446,7 +446,7 @@ class AsyncTradeLogger:
 class PolymarketBotV3:
     def __init__(self):
         self.running = True
-        self.paper_trade = False # LIVE MODE ACTIVATED
+        self.paper_trade = False # Default, will be overridden by config
         self.positions = []
         self.cycle_manager = MarketCycleManager()
         self.strategy = ProbabilityStrategy()
@@ -467,18 +467,18 @@ class PolymarketBotV3:
             logger.warning("CLOB Client not init (Fees will be estimated)")
         
         # Trading Parameters (Loaded from config)
-        self.config_file = "polymarket-bot/config.json"
+        self.config_file = "config.json"
         self.load_config()
         
         # Performance History
         self.performance_history = [] 
         
         # [Surgical Refactor] Async Logger
-        self.trade_logger = AsyncTradeLogger("polymarket-bot/paper_trades.jsonl")
+        self.trade_logger = AsyncTradeLogger("paper_trades.jsonl")
         
         # Load ML Model (Prefer V2.0 if exists)
         self.ml_model = None
-        model_paths = ["polymarket-bot/ml_model_v2.pkl", "polymarket-bot/ml_model_v1.pkl"]
+        model_paths = ["ml_model_v2.pkl", "ml_model_v1.pkl"]
         for p in model_paths:
             if os.path.exists(p):
                 try:
@@ -504,7 +504,8 @@ class PolymarketBotV3:
                     self.fee_pct = conf.get("fee_pct", 0.03)
                     self.obi_threshold = conf.get("obi_threshold", 1.5) # New Param
                     self.execution_enabled = conf.get("execution_enabled", False) # Safety Switch
-                    logger.info(f"⚙️ 配置已加载: SL {self.stop_loss_pct:.0%} | Edge {self.min_edge:.0%} | Exec {self.execution_enabled}")
+                    self.paper_trade = conf.get("paper_trade", False) # Paper Trading Mode
+                    logger.info(f"⚙️ 配置已加载: SL {self.stop_loss_pct:.0%} | Edge {self.min_edge:.0%} | Exec {self.execution_enabled} | Paper {self.paper_trade}")
             else:
                 logger.warning("⚠️ 配置文件未找到，使用默认参数")
                 # Defaults already set in init? No, setting them now if missing
@@ -514,18 +515,19 @@ class PolymarketBotV3:
                 if not hasattr(self, 'fee_pct'): self.fee_pct = 0.03
                 if not hasattr(self, 'obi_threshold'): self.obi_threshold = 1.5
                 if not hasattr(self, 'execution_enabled'): self.execution_enabled = False
+                if not hasattr(self, 'paper_trade'): self.paper_trade = False
         except Exception as e:
             logger.error(f"Config load error: {e}")
 
     def analyze_performance(self):
         """Self-Correction: Adjust parameters based on recent performance"""
         try:
-            if not os.path.exists("polymarket-bot/paper_trades.jsonl"): return
+            if not os.path.exists("paper_trades.jsonl"): return
             
             # File Size Protection: If > 10MB, rotate it
-            if os.path.getsize("polymarket-bot/paper_trades.jsonl") > 10 * 1024 * 1024:
+            if os.path.getsize("paper_trades.jsonl") > 10 * 1024 * 1024:
                 logger.info("维护: paper_trades.jsonl 过大，进行归档清理...")
-                os.rename("polymarket-bot/paper_trades.jsonl", f"paper_trades_{int(time.time())}.jsonl")
+                os.rename("paper_trades.jsonl", f"paper_trades_{int(time.time())}.jsonl")
             
             wins = 0
             losses = 0
@@ -533,7 +535,7 @@ class PolymarketBotV3:
             gross_loss = 0.0
             recent_trades = []
             
-            with open("polymarket-bot/paper_trades.jsonl", "r") as f:
+            with open("paper_trades.jsonl", "r") as f:
                 for line in f:
                     try:
                         trade = json.loads(line)
@@ -754,8 +756,7 @@ class PolymarketBotV3:
                         pricing_power = liq_data.get('bid_depth', 0) - liq_data.get('ask_depth', 0)
                         price_time = (current_btc - market.strike_price) * (16 - time_left)
 
-                        # [Fix] Dynamic feature set to handle model versions
-                        # Model expects 13 features, remove newest 2 for compatibility
+                        # [Fix] v2 model expects 15 features
                         X_df = pd.DataFrame([{
                             'direction_code': 1, 
                             'hour': now_utc.hour,
@@ -771,9 +772,10 @@ class PolymarketBotV3:
                             # [Added for V2]
                             'strike': market.strike_price,
                             'diff_from_strike': current_btc - market.strike_price,
-                            'minutes_remaining': time_left
-                            # Note: Removed 'price_time_interaction' and 'pricing_power_index' 
-                            # to maintain compatibility with v2 model (13 features)
+                            'minutes_remaining': time_left,
+                            # [V2 Features] Required for ml_model_v2.pkl (15 features total)
+                            'price_time_interaction': price_time,
+                            'pricing_power_index': pricing_power
                         }])
                         
                         # 4. Predict
