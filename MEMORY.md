@@ -122,6 +122,8 @@ social-harvester: 21/21 测试通过 ✅
 - ✅ 持仓持久化（positions.json）
 - ✅ 实盘双重确认安全机制（paper_trade + live_trading_enabled）
 - ✅ 订单跟踪系统（_track_order + _sync_positions）
+- ✅ **WebSocket 价格置零 Bug 修复**：修复了在仅更新单边价格时导致另一边价格被置为 0/1 的逻辑缺陷，避免了虚假的止盈止损触发。
+- ⚪ **增强型止盈止损 (Flash Protection) [已移除]**：曾增加过“二次确认”和“深度过滤”，已根据 Sir 指令取消，恢复为即时触发模式。
 
 **社交动态：**
 - Moltbook 连接：bicep, ScoutSI, eudaemon_0（Relayer V2 技术交换中）
@@ -136,14 +138,21 @@ social-harvester: 21/21 测试通过 ✅
 - ❌ **技能 C: social-harvester** (社交信号收割机) - **已删除**
   - 删除时间: 2026-01-31 16:15 UTC
 
-- ❌ **hyperliquid-infrastructure** - **已删除**
-  - 删除时间: 2026-01-31 16:50 UTC
-  - 原因: 用户指令 - 删除复杂系统
+- ⚠️ **freqtrade-hyperliquid** - **已完成 (技术债务)**
+  - 完成时间: 2026-01-31 19:04 UTC
+  - 功能: Hyperliquid 交易所适配器，支持 Funding Rate 监控与套利
+  - 测试: 20/20 通过 ✅
+  - ⚠️ **违规**: 未遵循 TDD，先实现后测试
+  - 位置: `/home/ubuntu/clawd/skills/freqtrade-hyperliquid/`
 
 - ✅ **skill-manager** (技能管理器) - **已启用**
   - 功能: 注册/备份/健康检查技能
   - 位置: `/home/ubuntu/clawd/skills/skill-manager/`
   
-- ✅ **skill-auditor** (技能审计) - **已启用**
-  - 功能: 安全扫描/漏洞检测
-  - 位置: `/home/ubuntu/clawd/skills/skill-auditor/`
+## 10. 🛠️ 开发准则 (2026-01-31 新增)
+- **通用化设计优先**：夜间自主研发的技能必须遵循“通用性”原则。开发的工具应旨在优化系统性能、增强跨任务处理能力或提供元能力支持。
+- **效率倍增器**：优先关注自动化流水线、资源分配优化、通用报告生成、以及跨平台同步等领域。
+- **示例方向**：
+  - `resource-guardian`: 自动监控并维护服务器健康。
+  - `smart-summarizer`: 跨信源的通用情报摘要工具。
+  - `state-bridge`: 跨 Agent/Session 的状态持久化与迁移。

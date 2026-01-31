@@ -68,22 +68,43 @@ CHAIN_ID = 137
 
 @dataclass
 class OrderBook:
-    """Real-time order book"""
+    """Real-time order book with depth support"""
     asset_id: str
     best_bid: float = 0.0
+    best_bid_size: float = 0.0
     best_ask: float = 1.0
+    best_ask_size: float = 0.0
     
     def update(self, data: dict):
         if data.get("event_type") == "price_change":
             for change in data.get("price_changes", []):
                 if change.get("asset_id") == self.asset_id:
-                    self.best_bid = float(change.get("best_bid", 0) or 0)
-                    self.best_ask = float(change.get("best_ask", 1) or 1)
+                    # [CRITICAL-Fix] Only update if value is present and not None
+                    new_bid = change.get("best_bid")
+                    if new_bid is not None:
+                        self.best_bid = float(new_bid)
+                    
+                    new_bid_size = change.get("best_bid_size")
+                    if new_bid_size is not None:
+                        self.best_bid_size = float(new_bid_size)
+                    
+                    new_ask = change.get("best_ask")
+                    if new_ask is not None:
+                        self.best_ask = float(new_ask)
+                    
+                    new_ask_size = change.get("best_ask_size")
+                    if new_ask_size is not None:
+                        self.best_ask_size = float(new_ask_size)
+
         elif data.get("event_type") == "book":
              bids = data.get("bids", [])
              asks = data.get("asks", [])
-             if bids: self.best_bid = float(bids[0]["price"])
-             if asks: self.best_ask = float(asks[0]["price"])
+             if bids: 
+                 self.best_bid = float(bids[0]["price"])
+                 self.best_bid_size = float(bids[0]["size"])
+             if asks: 
+                 self.best_ask = float(asks[0]["price"])
+                 self.best_ask_size = float(asks[0]["size"])
 
 @dataclass
 class Market15m:
@@ -1179,24 +1200,17 @@ class PolymarketBotV3:
         """[P1-Fix] 统一处理止盈止损，避免竞争条件"""
         for p in list(self.positions):
             if p["market_slug"] != market.slug: continue
-            if p.get("status") != "OPEN": continue  # Skip closed positions
-            if p.get("exit_checked", False): continue  # [P1-Fix] 已检查过，防止重复
+            if p.get("status") != "OPEN": continue
+            if p.get("exit_checked", False): continue
             
-            # [CRITICAL-Fix] 使用真实可成交价格，不是中间价！
-            # 止盈/止损检查必须基于实际能卖出的价格 (best_bid)
             if p["direction"] == "UP":
-                # 持有 UP，用 book_up 的价格
-                current_bid = market.book_up.best_bid  # 能卖出的价格
-                current_ask = market.book_up.best_ask  # 买入价格（用于止损计算）
+                current_bid = market.book_up.best_bid
             else:
-                # 持有 DOWN，用 book_down 的价格  
-                current_bid = market.book_down.best_bid  # 能卖出的价格
-                current_ask = market.book_down.best_ask  # 买入价格
+                current_bid = market.book_down.best_bid
             
-            if current_bid <= 0: continue  # 无流动性
+            if current_bid <= 0: continue
             
             entry_price = p["entry_price"]
-            # [CRITICAL-Fix] 用实际可成交的 best_bid 计算盈亏
             pnl_pct = (current_bid - entry_price) / entry_price
             exit_price = round(current_bid, 2)
             
@@ -1204,20 +1218,20 @@ class PolymarketBotV3:
             if int(time.time()) % 10 == 0:
                 logger.info(f"[DEBUG] 持仓检查: {p['direction']} entry={entry_price:.2f} current_bid={current_bid:.2f} pnl={pnl_pct:.1%}")
             
-            # [P1-Fix] 优先检查止损（风险控制优先）
+            # [P1-Fix] 优先检查止损
             if pnl_pct < -self.stop_loss_pct:
                 p["status"] = "SL_HIT"
                 p["exit_price"] = exit_price
                 p["exit_time"] = datetime.now(timezone.utc).isoformat()
                 p["pnl"] = pnl_pct
-                p["exit_checked"] = True  # [P1-Fix] 标记已处理
+                p["exit_checked"] = True
                 self.positions.remove(p)
-                self._save_positions()  # [P1-Fix] 保存持仓变更
+                self._save_positions()
                 
                 logger.warning(f"🛑 止损触发! {p['direction']} @ {exit_price:.2f} (Entry: {entry_price:.2f}, PnL: {pnl_pct:.1%})")
                 self._notify_user(f"🛑 止损离场: {p['direction']}\n📉 触发价: {exit_price:.2f}\n💸 PnL: {pnl_pct:.1%}")
                 
-                self.trade_logger.log({
+                exit_record = {
                     "time": datetime.now(timezone.utc).isoformat(),
                     "type": "STOP_LOSS_PAPER" if self.paper_trade else "STOP_LOSS",
                     "market": market.slug,
@@ -1225,28 +1239,37 @@ class PolymarketBotV3:
                     "entry_price": entry_price,
                     "exit_price": exit_price,
                     "pnl": pnl_pct,
-                    "mode": "PAPER" if self.paper_trade else "LIVE"
-                })
-                continue  # [P1-Fix] 已处理，跳过止盈检查
+                    "mode": "PAPER" if self.paper_trade else "LIVE",
+                    # [新增] 继承入场特征
+                    "poly_spread": p.get("poly_spread", 0.01),
+                    "poly_bid_depth": p.get("poly_bid_depth", 500.0),
+                    "poly_ask_depth": p.get("poly_ask_depth", 500.0),
+                    "hour": p.get("hour", datetime.now(timezone.utc).hour),
+                    "dayofweek": p.get("dayofweek", datetime.now(timezone.utc).weekday()),
+                    "minutes_remaining": p.get("minutes_remaining", 0),
+                    "btc_price": p.get("btc_price", 0),
+                    "diff_from_strike": p.get("diff_from_strike", 0)
+                }
+                self.trade_logger.log(exit_record)
+                continue
             
             # [P1-Fix] 再检查止盈
             tp_price = entry_price * 1.15
             if tp_price >= 0.99: tp_price = 0.99
             
-            # [CRITICAL-Fix] 止盈也必须基于可成交价格 current_bid
             if current_bid >= tp_price:
                 p["status"] = "TP_HIT"
                 p["exit_price"] = exit_price
                 p["exit_time"] = datetime.now(timezone.utc).isoformat()
                 p["pnl"] = pnl_pct
-                p["exit_checked"] = True  # [P1-Fix] 标记已处理
+                p["exit_checked"] = True
                 self.positions.remove(p)
-                self._save_positions()  # [P1-Fix] 保存持仓变更
+                self._save_positions()
                 
                 logger.info(f"💰 止盈触发! {p['direction']} @ {exit_price:.2f} (Entry: {entry_price:.2f}, PnL: {pnl_pct:.1%})")
                 self._notify_user(f"💰 止盈离场: {p['direction']}\n💸 价格: {exit_price:.2f} (+{pnl_pct*100:.0f}%)")
                 
-                self.trade_logger.log({
+                exit_record = {
                     "time": datetime.now(timezone.utc).isoformat(),
                     "type": "TAKE_PROFIT_PAPER" if self.paper_trade else "TAKE_PROFIT",
                     "market": market.slug,
@@ -1254,8 +1277,35 @@ class PolymarketBotV3:
                     "entry_price": entry_price,
                     "exit_price": exit_price,
                     "pnl": pnl_pct,
-                    "mode": "PAPER" if self.paper_trade else "LIVE"
-                })
+                    "mode": "PAPER" if self.paper_trade else "LIVE",
+                    # [新增] 继承入场特征
+                    "poly_spread": p.get("poly_spread", 0.01),
+                    "poly_bid_depth": p.get("poly_bid_depth", 500.0),
+                    "poly_ask_depth": p.get("poly_ask_depth", 500.0),
+                    "hour": p.get("hour", datetime.now(timezone.utc).hour),
+                    "dayofweek": p.get("dayofweek", datetime.now(timezone.utc).weekday()),
+                    "minutes_remaining": p.get("minutes_remaining", 0),
+                    "btc_price": p.get("btc_price", 0),
+                    "diff_from_strike": p.get("diff_from_strike", 0)
+                }
+                self.trade_logger.log(exit_record)
+
+    def _calc_minutes_remaining(self):
+        """计算距离当前15分钟周期结束还有多少分钟"""
+        now = datetime.now(timezone.utc)
+        minute = now.minute
+        if minute < 15:
+            target = 15
+        elif minute < 30:
+            target = 30
+        elif minute < 45:
+            target = 45
+        else:
+            target = 60
+        remaining = target - minute
+        if remaining < 0:
+            remaining += 60
+        return remaining
 
     def _notify_user(self, message):
         """Send push notification via Clawdbot"""
@@ -1336,7 +1386,15 @@ class PolymarketBotV3:
                 }
                 self.positions.append(position)
                 
-                # 记录交易日志
+                # 记录交易日志 [增强版 - 捕获所有特征数据]
+                if direction == "UP":
+                    book = market.book_up
+                else:
+                    book = market.book_down
+                
+                # 获取当前BTC价格
+                current_btc_price = BinanceData.get_current_price() or 0.0
+                
                 trade_record = {
                     "time": datetime.now(timezone.utc).isoformat(),
                     "type": "V3_SMART_PAPER",
@@ -1346,7 +1404,20 @@ class PolymarketBotV3:
                     "strike": market.strike_price,
                     "fee": self.fee_pct,
                     "status": "OPEN",
-                    "market": market.slug
+                    "market": market.slug,
+                    # [新增] 盘口特征数据
+                    "poly_spread": round(book.best_ask - book.best_bid, 4),
+                    "poly_bid": book.best_bid,
+                    "poly_ask": book.best_ask,
+                    "poly_bid_depth": book.best_bid_size,
+                    "poly_ask_depth": book.best_ask_size,
+                    # [新增] 时间特征
+                    "hour": datetime.now(timezone.utc).hour,
+                    "dayofweek": datetime.now(timezone.utc).weekday(),
+                    "minutes_remaining": self._calc_minutes_remaining(),
+                    # [新增] BTC价格特征
+                    "btc_price": current_btc_price,
+                    "diff_from_strike": current_btc_price - market.strike_price if current_btc_price else 0.0
                 }
                 self.trade_logger.log(trade_record)
                 
@@ -1549,13 +1620,27 @@ class WebSocketManagerV3:
         elif data.get("event_type") == "price_change":
             for p in data.get("price_changes", []):
                 aid = p.get("asset_id")
-                # [Fix] 同时更新 best_bid 和 best_ask
+                # [Fix] Only update if values are present to avoid zeroing out
+                target_book = None
                 if aid == self.market.token_id_up:
-                    self.market.book_up.best_bid = float(p.get("best_bid") or 0)
-                    self.market.book_up.best_ask = float(p.get("best_ask") or 1)
+                    target_book = self.market.book_up
                 elif aid == self.market.token_id_down:
-                    self.market.book_down.best_bid = float(p.get("best_bid") or 0)
-                    self.market.book_down.best_ask = float(p.get("best_ask") or 1)
+                    target_book = self.market.book_down
+                
+                if target_book:
+                    new_bid = p.get("best_bid")
+                    if new_bid is not None:
+                        target_book.best_bid = float(new_bid)
+                    new_bid_size = p.get("best_bid_size")
+                    if new_bid_size is not None:
+                        target_book.best_bid_size = float(new_bid_size)
+                        
+                    new_ask = p.get("best_ask")
+                    if new_ask is not None:
+                        target_book.best_ask = float(new_ask)
+                    new_ask_size = p.get("best_ask_size")
+                    if new_ask_size is not None:
+                        target_book.best_ask_size = float(new_ask_size)
     async def close(self):
         self.running = False
         if self.ws: await self.ws.close()

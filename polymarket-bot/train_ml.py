@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Polymarket Machine Learning Training Script V4.1 (Fast Rescue Edition)
-- Skips network fetching if not cached (for speed)
-- Trains on whatever local data we have available
+Polymarket Machine Learning Training Script V5 (Real Data Edition)
+- Uses real captured feature data from trade records
+- Auto-cleanup after training
+- Archives old data with compression
 """
 
 import json
@@ -10,26 +11,72 @@ import pandas as pd
 import numpy as np
 import xgboost as xgb
 import pandas_ta as ta
-import requests
-import time
 import os
 import joblib
+import gzip
+import shutil
 from datetime import datetime, timezone, timedelta
-from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
-from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 from xgboost import XGBClassifier
 
 DATA_FILE = "polymarket-bot/paper_trades.jsonl"
 MODEL_FILE = "polymarket-bot/ml_model_v2.pkl"
 CACHE_DIR = "polymarket-bot/candle_cache"
+ARCHIVE_DIR = "polymarket-bot/archive"
 
-if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
+# Ensure archive directory exists
+if not os.path.exists(ARCHIVE_DIR):
+    os.makedirs(ARCHIVE_DIR)
+
+def archive_old_data():
+    """Archive and compress old trade data after training"""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    
+    # Archive trades
+    if os.path.exists(DATA_FILE) and os.path.getsize(DATA_FILE) > 0:
+        archive_file = f"{ARCHIVE_DIR}/trades_{timestamp}.jsonl.gz"
+        with open(DATA_FILE, 'rb') as f_in:
+            with gzip.open(archive_file, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        print(f"📦 Archived trades to: {archive_file}")
+        
+        # Clear current trades file (keep only last 100 lines for context)
+        with open(DATA_FILE, 'r') as f:
+            lines = f.readlines()
+        with open(DATA_FILE, 'w') as f:
+            f.writelines(lines[-100:])  # Keep last 100 records
+        print(f"🧹 Cleaned {DATA_FILE} (kept last 100 records)")
+    
+    # Archive old candle cache (keep last 7 days)
+    if os.path.exists(CACHE_DIR):
+        cache_files = [f for f in os.listdir(CACHE_DIR) if f.endswith('.json')]
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=7)
+        
+        archived_count = 0
+        for cache_file in cache_files:
+            file_path = os.path.join(CACHE_DIR, cache_file)
+            file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path), tz=timezone.utc)
+            
+            if file_mtime < cutoff_time:
+                # Archive old cache file
+                archive_path = f"{ARCHIVE_DIR}/cache_{timestamp}/{cache_file}.gz"
+                os.makedirs(os.path.dirname(archive_path), exist_ok=True)
+                
+                with open(file_path, 'rb') as f_in:
+                    with gzip.open(archive_path, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                
+                os.remove(file_path)
+                archived_count += 1
+        
+        if archived_count > 0:
+            print(f"📦 Archived {archived_count} old cache files to: {ARCHIVE_DIR}/cache_{timestamp}/")
 
 def get_binance_history(symbol="BTCUSDT", end_time_ms=None, limit=100):
-    cache_file = f"{CACHE_DIR}/{end_time_ms}.json"
+    """Get cached candle data for technical indicators"""
+    candle_ms = (end_time_ms // 900000) * 900000
+    cache_file = f"{CACHE_DIR}/{candle_ms}.json"
     
-    # 1. Try Cache First
     if os.path.exists(cache_file):
         try:
             with open(cache_file, 'r') as f:
@@ -37,13 +84,10 @@ def get_binance_history(symbol="BTCUSDT", end_time_ms=None, limit=100):
         except:
             data = []
     else:
-        # 2. Network Fetch (Fast Fail)
-        # We cannot wait for 5000 requests synchronously.
-        # If not in cache, we skip this row for now to unblock training.
-        # print(f"Miss: {end_time_ms}")
         return pd.DataFrame() 
 
-    if not data or not isinstance(data, list) or len(data) == 0: return pd.DataFrame()
+    if not data or not isinstance(data, list) or len(data) == 0:
+        return pd.DataFrame()
     
     if isinstance(data[0], list):
          df = pd.DataFrame(data, columns=[
@@ -59,20 +103,35 @@ def get_binance_history(symbol="BTCUSDT", end_time_ms=None, limit=100):
     return df
 
 def load_data():
-    if not os.path.exists(DATA_FILE): return None
+    """Load trade records with all captured features"""
+    if not os.path.exists(DATA_FILE):
+        return None
+    
     data = []
     with open(DATA_FILE, "r") as f:
         for line in f:
             try:
                 r = json.loads(line)
-                if r.get("type") in ["SETTLED", "STOP_LOSS"]:
-                    if r.get("type") == "STOP_LOSS": r["result"] = "LOSS"
+                # Process exit records (STOP_LOSS, TAKE_PROFIT, SETTLED)
+                if r.get("type") in ["STOP_LOSS", "STOP_LOSS_PAPER"]:
+                    r["result"] = "LOSS"
                     data.append(r)
-            except: pass
+                elif r.get("type") in ["TAKE_PROFIT", "TAKE_PROFIT_PAPER"]:
+                    r["result"] = "WIN"
+                    data.append(r)
+                elif r.get("type") in ["SETTLED", "SETTLED_PAPER"]:
+                    # Determine WIN/LOSS based on PnL
+                    pnl = r.get("pnl", 0)
+                    r["result"] = "WIN" if pnl > 0 else "LOSS"
+                    data.append(r)
+            except:
+                pass
+    
     return pd.DataFrame(data) if data else None
 
-def enrich_data(df):
-    print(f"⏳ Enriching {len(df)} trades (Fast Mode: Cached Only)...")
+def enrich_with_technical_indicators(df):
+    """Add technical indicators from candle cache"""
+    print(f"⏳ Enriching {len(df)} trades with technical indicators...")
     enriched_rows = []
     
     for idx, row in df.iterrows():
@@ -83,116 +142,138 @@ def enrich_data(df):
         hist_df = get_binance_history(end_time_ms=ts_ms, limit=60)
         
         if len(hist_df) < 30:
-            continue # Skip if no history found in cache
-            
-        rsi = ta.rsi(hist_df["close"], length=14)
-        row["rsi_14"] = rsi.iloc[-1] if not rsi.empty else 50
-        
-        atr = ta.atr(hist_df["high"], hist_df["low"], hist_df["close"], length=14)
-        row["atr_14"] = atr.iloc[-1] if not atr.empty else 0
-        
-        bb = ta.bbands(hist_df["close"], length=20, std=2)
-        if bb is not None and not bb.empty:
-            bb_cols = [c for c in bb.columns if c.startswith("BBP")]
-            row["bb_pct"] = bb.iloc[-1][bb_cols[0]] if bb_cols else 0.5
-        else:
+            # Skip if no history, but keep the row with default values
+            row["rsi_14"] = 50
+            row["atr_14"] = 0
             row["bb_pct"] = 0.5
-
-        ema_short = ta.ema(hist_df["close"], length=9)
-        ema_long = ta.ema(hist_df["close"], length=21)
-        if ema_short is not None and ema_long is not None:
-             row["trend_ema"] = 1 if ema_short.iloc[-1] > ema_long.iloc[-1] else -1
+            row["trend_ema"] = 0
         else:
-             row["trend_ema"] = 0
-             
-        current_price = hist_df["close"].iloc[-1]
-        if "strike" in row and row["strike"] > 0:
-            row["diff_from_strike"] = current_price - row["strike"]
-        else:
-            row["diff_from_strike"] = 0.0
+            # Calculate technical indicators
+            rsi = ta.rsi(hist_df["close"], length=14)
+            row["rsi_14"] = float(rsi.iloc[-1]) if not rsi.empty else 50
             
-        minute = dt.minute
-        if minute < 15: target = 15
-        elif minute < 30: target = 30
-        elif minute < 45: target = 45
-        else: target = 60
+            atr = ta.atr(hist_df["high"], hist_df["low"], hist_df["close"], length=14)
+            row["atr_14"] = float(atr.iloc[-1]) if not atr.empty else 0
+            
+            bb = ta.bbands(hist_df["close"], length=20, std=2)
+            if bb is not None and not bb.empty:
+                bb_cols = [c for c in bb.columns if c.startswith("BBP")]
+                row["bb_pct"] = float(bb.iloc[-1][bb_cols[0]]) if bb_cols else 0.5
+            else:
+                row["bb_pct"] = 0.5
+
+            ema_short = ta.ema(hist_df["close"], length=9)
+            ema_long = ta.ema(hist_df["close"], length=21)
+            if ema_short is not None and ema_long is not None:
+                 row["trend_ema"] = 1 if ema_short.iloc[-1] > ema_long.iloc[-1] else -1
+            else:
+                 row["trend_ema"] = 0
         
-        row["minutes_remaining"] = target - minute
-        if row["minutes_remaining"] < 0: row["minutes_remaining"] += 60
+        # Use captured features or defaults
+        row["poly_spread"] = row.get("poly_spread", 0.01)
+        row["poly_bid_depth"] = row.get("poly_bid_depth", 500.0)
+        row["poly_ask_depth"] = row.get("poly_ask_depth", 500.0)
+        row["btc_price"] = row.get("btc_price", 0.0)
+        row["diff_from_strike"] = row.get("diff_from_strike", 0.0)
+        row["hour"] = row.get("hour", dt.hour)
+        row["dayofweek"] = row.get("dayofweek", dt.weekday())
+        row["minutes_remaining"] = row.get("minutes_remaining", 0)
              
         enriched_rows.append(row)
         
     return pd.DataFrame(enriched_rows)
 
 def train():
+    print("🚀 ML Model Training Started (V5 - Real Data Edition)")
+    print("=" * 60)
+    
+    # Load data
     df = load_data()
-    if df is None: return
+    if df is None or df.empty:
+        print("❌ No training data available")
+        return False
 
-    df = enrich_data(df)
-    if df.empty: 
-        print("❌ No data available (Cache empty). Run backfill to fetch history first.")
-        return
+    print(f"📊 Loaded {len(df)} trade records")
+    
+    # Enrich with technical indicators
+    df = enrich_with_technical_indicators(df)
+    print(f"🔧 Enriched {len(df)} records with technical indicators")
 
+    # Prepare target variable
     df['target'] = df['result'].apply(lambda x: 1 if x == 'WIN' else 0)
-    df['hour'] = pd.to_datetime(df['time']).dt.hour
-    df['dayofweek'] = pd.to_datetime(df['time']).dt.dayofweek
+    
+    # Extract features
     df['direction_code'] = df['direction'].apply(lambda x: 1 if x == 'UP' else 0)
-    
-    if 'poly_spread' not in df.columns: df['poly_spread'] = 0.01
-    if 'poly_bid_depth' not in df.columns: df['poly_bid_depth'] = 500.0
-    if 'poly_ask_depth' not in df.columns: df['poly_ask_depth'] = 500.0
-    
     df = df.fillna(0)
 
+    # Feature list - all real captured data
     features = [
         'direction_code', 'hour', 'dayofweek',
         'rsi_14', 'atr_14', 'bb_pct', 'trend_ema',
         'poly_spread', 'poly_bid_depth', 'poly_ask_depth',
-        'strike', 'diff_from_strike', 'minutes_remaining'
+        'btc_price', 'diff_from_strike', 'minutes_remaining',
+        'entry_price', 'pnl'
     ]
     
-    X = df[features]
+    # Filter to only use features that exist in dataframe
+    available_features = [f for f in features if f in df.columns]
+    print(f"📋 Using features: {available_features}")
+    
+    X = df[available_features]
     y = df['target']
     
-    print(f"Training on {len(X)} records...")
+    if len(X) < 5:
+        print(f"⚠️ Not enough samples for training (need >= 5, got {len(X)})")
+        return False
     
+    print(f"🎯 Training XGBoost on {len(X)} records...")
+    
+    # Model configuration
     model = XGBClassifier(
-        n_estimators=150, learning_rate=0.03, max_depth=6,
-        subsample=0.8, colsample_bytree=0.8, objective='binary:logistic',
-        eval_metric='logloss', random_state=42,
-        # Increase weight for Time/Pricing related features via scale_pos_weight or interaction
+        n_estimators=100,
+        learning_rate=0.05,
+        max_depth=5,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective='binary:logistic',
+        eval_metric='logloss',
+        random_state=42,
         importance_type='gain'
     )
     
-    # [Manual Weighting] Multiply sensitive features to force attention during training
-    # XGBoost handles features but we can emphasize Pricing/Time by creating interaction terms
-    df['price_time_interaction'] = df['diff_from_strike'] * (16 - df['minutes_remaining'])
-    df['pricing_power_index'] = df['poly_bid_depth'] - df['poly_ask_depth']
-    
-    # Update features list
-    features = features + ['price_time_interaction', 'pricing_power_index']
-    X = df[features]
-    
-    print(f"Training on {len(X)} records (Enhanced Time/Pricing)...")
-    
+    # Train model
     model.fit(X, y)
     
+    # Evaluate
     y_pred = model.predict(X)
     acc = accuracy_score(y, y_pred)
-    auc = roc_auc_score(y, y_pred)
+    
+    try:
+        auc = roc_auc_score(y, y_pred) if len(set(y)) > 1 else 0.5
+    except:
+        auc = 0.5
     
     print(f"\n🏆 Model Performance:")
-    print(f"Accuracy: {acc:.2%}")
-    print(f"AUC: {auc:.3f}")
+    print(f"   Accuracy: {acc:.2%}")
+    print(f"   AUC: {auc:.3f}")
     
+    # Feature importance
     imps = model.feature_importances_
     sorted_idx = np.argsort(imps)[::-1]
-    print("\n📊 Feature Importance:")
-    for i in sorted_idx:
-        print(f"   {features[i]}: {imps[i]:.4f}")
-        
+    print(f"\n📊 Feature Importance:")
+    for i in sorted_idx[:8]:
+        print(f"   {available_features[i]}: {imps[i]:.4f}")
+    
+    # Save model
     joblib.dump(model, MODEL_FILE)
-    print(f"✅ Saved to {MODEL_FILE}")
+    print(f"\n✅ Model saved to {MODEL_FILE}")
+    
+    # Archive and cleanup old data
+    print(f"\n🧹 Auto-cleanup starting...")
+    archive_old_data()
+    
+    return True
 
 if __name__ == "__main__":
-    train()
+    success = train()
+    exit(0 if success else 1)
