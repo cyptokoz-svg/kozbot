@@ -1,0 +1,46 @@
+{
+  "version": "0.1.0",
+  "updated_at": "2026-01-31T02:07:04.122875+00:00",
+  "skills": {
+    "state-syncer": {
+      "name": "state-syncer",
+      "version": "0.1.0",
+      "path": "/home/ubuntu/clawd/skills/skill-manager/../state-syncer",
+      "status": "healthy",
+      "last_check": "2026-01-31T02:07:04.119795+00:00",
+      "checksum": "1a14c93a551e725f",
+      "dependencies": [],
+      "health_score": 100
+    },
+    "skill-auditor": {
+      "name": "skill-auditor",
+      "version": "0.1.0",
+      "path": "/home/ubuntu/clawd/skills/skill-manager/../skill-auditor",
+      "status": "healthy",
+      "last_check": "2026-01-31T02:07:04.121095+00:00",
+      "checksum": "f849a51efcb87dc3",
+      "dependencies": [],
+      "health_score": 100
+    },
+    "model-router": {
+      "name": "model-router",
+      "version": "0.1.0",
+      "path": "/home/ubuntu/clawd/skills/skill-manager/../model-router",
+      "status": "healthy",
+      "last_check": "2026-01-31T02:07:04.122482+00:00",
+      "checksum": "af4f19c3efc08b73",
+      "dependencies": [],
+      "health_score": 100
+    },
+    "": {
+      "name": "",
+      "version": "0.1.0 | Built with TDD principles",
+      "path": "/home/ubuntu/clawd/skills/skill-manager",
+      "status": "degraded",
+      "last_check": "2026-01-31T02:07:04.122872+00:00",
+      "checksum": "890a7309699f8a50",
+      "dependencies": [],
+      "health_score": 80
+    }
+  }
+}
