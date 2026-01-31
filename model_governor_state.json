@@ -1,0 +1,15 @@
+{
+  "timestamp": 1769881332.8408992,
+  "active_model": "gemini-3-flash",
+  "router_tier": "HIGH",
+  "suggestion": "google-antigravity/gemini-3-flash",
+  "pool_status": [
+    "google-antigravity/claude-opus-4-5-thinking",
+    "google-antigravity/gemini-3-pro-high",
+    "google-antigravity/gemini-3-pro-preview",
+    "google-antigravity/gemini-2.5-pro",
+    "google-antigravity/gemini-3-flash",
+    "google-antigravity/gemini-2.5-flash-thinking",
+    "google-antigravity/gemini-2.5-flash"
+  ]
+}

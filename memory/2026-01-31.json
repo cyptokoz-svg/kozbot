@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1.0",
+  "date": "2026-01-31",
+  "agent": "JARVIS-Koz",
+  "entities": [
+    {
+      "id": "mem_20260131_005",
+      "type": "state",
+      "timestamp": "2026-01-31T15:15:00Z",
+      "content": {
+        "bot_status": "running",
+        "pid": 206303,
+        "mode": "paper_trade",
+        "cycle": "15:00-15:15",
+        "recent_fixes": ["P0_order_tracking", "P1_exit_conditions", "P2_persistence"]
+      },
+      "tags": ["current", "trading"],
+      "importance": "high"
+    }
+  ],
+  "metadata": {
+    "archived": "2026-01-31T15:15:00Z",
+    "full_history": "see MEMORY.md section 9"
+  }
+}

@@ -470,6 +470,10 @@ class PolymarketBotV3:
         self.config_file = "config.json"
         self.load_config()
         
+        # [P1-Fix] Positions persistence
+        self.positions_file = "positions.json"
+        self._load_positions()
+        
         # Performance History
         self.performance_history = [] 
         
@@ -505,7 +509,9 @@ class PolymarketBotV3:
                     self.obi_threshold = conf.get("obi_threshold", 1.5) # New Param
                     self.execution_enabled = conf.get("execution_enabled", False) # Safety Switch
                     self.paper_trade = conf.get("paper_trade", False) # Paper Trading Mode
-                    logger.info(f"⚙️ 配置已加载: SL {self.stop_loss_pct:.0%} | Edge {self.min_edge:.0%} | Exec {self.execution_enabled} | Paper {self.paper_trade}")
+                    # [CRITICAL] 实盘双重确认机制
+                    self.live_trading_enabled = conf.get("live_trading_enabled", False)
+                    logger.info(f"⚙️ 配置已加载: SL {self.stop_loss_pct:.0%} | Edge {self.min_edge:.0%} | Exec {self.execution_enabled} | Paper {self.paper_trade} | Live {self.live_trading_enabled}")
             else:
                 logger.warning("⚠️ 配置文件未找到，使用默认参数")
                 # Defaults already set in init? No, setting them now if missing
@@ -516,9 +522,64 @@ class PolymarketBotV3:
                 if not hasattr(self, 'obi_threshold'): self.obi_threshold = 1.5
                 if not hasattr(self, 'execution_enabled'): self.execution_enabled = False
                 if not hasattr(self, 'paper_trade'): self.paper_trade = False
+                if not hasattr(self, 'live_trading_enabled'): self.live_trading_enabled = False
         except Exception as e:
             logger.error(f"Config load error: {e}")
 
+    def _load_positions(self):
+        """[P1-Fix] 加载持久化的持仓"""
+        try:
+            if os.path.exists(self.positions_file):
+                with open(self.positions_file, "r") as f:
+                    data = json.load(f)
+                    self.positions = data.get("positions", [])
+                    logger.info(f"💾 已加载 {len(self.positions)} 个持仓记录")
+            else:
+                self.positions = []
+        except Exception as e:
+            logger.error(f"加载持仓失败: {e}")
+            self.positions = []
+    
+    async def _sync_positions_from_exchange(self):
+        """[P0-Fix] 从交易所同步真实持仓"""
+        if not self.clob_client or self.paper_trade:
+            return
+        
+        try:
+            logger.info("🔄 同步交易所持仓...")
+            # 获取市场数据来重建持仓
+            exchange_positions = await self.clob_client.get_positions()
+            
+            if exchange_positions:
+                # 清理本地已关闭的持仓
+                open_local = [p for p in self.positions if p.get("status") == "OPEN"]
+                
+                # 对比交易所持仓
+                for local_pos in open_local:
+                    matching = None
+                    for ex_pos in exchange_positions:
+                        if ex_pos.get("market_slug") == local_pos.get("market_slug"):
+                            matching = ex_pos
+                            break
+                    
+                    if not matching:
+                        # 交易所无此持仓，可能已平仓
+                        logger.warning(f"⚠️ 交易所无持仓: {local_pos['market_slug']}")
+                        local_pos["status"] = "CLOSED_EXTERNALLY"
+                
+                self._save_positions()
+                logger.info(f"✅ 持仓同步完成: {len(self.positions)} 本地, {len(exchange_positions)} 交易所")
+        except Exception as e:
+            logger.error(f"同步持仓失败: {e}")
+    
+    def _save_positions(self):
+        """[P1-Fix] 保存持仓到文件"""
+        try:
+            with open(self.positions_file, "w") as f:
+                json.dump({"positions": self.positions, "updated": datetime.now(timezone.utc).isoformat()}, f)
+        except Exception as e:
+            logger.error(f"保存持仓失败: {e}")
+    
     def analyze_performance(self):
         """Self-Correction: Adjust parameters based on recent performance"""
         try:
@@ -603,6 +664,10 @@ class PolymarketBotV3:
             try:
                 # Run Auto-Tuning every cycle
                 self.analyze_performance()
+                
+                # [P0-Fix] 每10分钟同步一次交易所持仓
+                if int(time.time()) % 600 == 0:
+                    await self._sync_positions_from_exchange()
                 
                 # Cleanup old positions from previous cycles
                 self.positions = [p for p in self.positions if (datetime.now(timezone.utc) - datetime.fromisoformat(p["timestamp"])).total_seconds() < 3600]
@@ -801,9 +866,8 @@ class PolymarketBotV3:
             
             diff = current_btc - market.strike_price
             
-            # Check Stop Loss for existing positions
-            await self.check_stop_loss(market)
-            await self.check_take_profit(market)
+            # [P1-Fix] 检查止盈止损 (统一处理避免竞争)
+            await self.check_exit_conditions(market)
 
             # --- [New] Cooldown Period Filter ---
             # Don't trade in the first 15 seconds of the market cycle to avoid opening noise
@@ -816,7 +880,6 @@ class PolymarketBotV3:
             # If within safety margin (ambiguous zone), force neutral probability or skip
             if abs(diff) < safety_margin:
                 # Calculate Edge even if skipping, for logging
-                obi = BinanceData.get_order_book_imbalance()
                 fee = market.dynamic_fee
                 edge_up = prob_up - mkt_up - fee
                 edge_down = prob_down - mkt_down - fee
@@ -828,7 +891,7 @@ class PolymarketBotV3:
                 
                 log_msg = (
                     f"剩余 {time_left:.1f}m | BTC: ${current_btc:.1f} (Diff: ${diff:+.1f}) | "
-                    f"Poly UP: ${mkt_up:.2f} | Prob UP: {prob_up:.1%} | OBI: {obi:.2f}x | "
+                    f"Poly UP: ${mkt_up:.2f} | Prob UP: {prob_up:.1%} | "
                     f"Edge UP: {edge_up:+.1%} | Edge DOWN: {edge_down:+.1%} | "
                     f"状态: 安全边际内(${safety_margin:.1f}) - 跳过"
                 )
@@ -863,14 +926,9 @@ class PolymarketBotV3:
                     logger.warning(f"⚠️ Edge DOWN 极端值截断: {edge_down:+.1%} → {max(min(edge_down, EDGE_LIMIT), -EDGE_LIMIT):+.1%}")
                     edge_down = max(min(edge_down, EDGE_LIMIT), -EDGE_LIMIT)
                 
-                # --- OBI Filter Integration ---
-                obi = BinanceData.get_order_book_imbalance()
-                # If OBI > 1.0, Bids are heavier (Bullish)
-                # If OBI < 1.0, Asks are heavier (Bearish)
-                
                 log_msg = (
                     f"剩余 {time_left:.1f}m | BTC: ${current_btc:.1f} (Diff: ${diff:+.1f}) | "
-                    f"Poly UP: ${mkt_up:.2f} | Prob UP: {prob_up:.1%} | OBI: {obi:.2f}x | "
+                    f"Poly UP: ${mkt_up:.2f} | Prob UP: {prob_up:.1%} | "
                     f"Edge UP: {edge_up:+.1%} | Edge DOWN: {edge_down:+.1%}"
                 )
                 
@@ -947,74 +1005,120 @@ class PolymarketBotV3:
             return None
 
     def _raw_redeem(self, condition_id):
-        """Execute Auto-Redeem via Gasless Relayer"""
+        """Execute Auto-Redeem via Relayer V2 with Builder Authentication (Gasless)"""
         if not self.clob_client or not FUNDER_ADDRESS:
             logger.error("❌ 无法赎回: 缺 Client 或 代理地址")
             return
 
         try:
-            logger.info(f"🏦 [EIP-712] 正在构建免 Gas 赎回交易... ID: {condition_id[:8]}")
+            logger.info(f"🏦 启动自动赎回流程 (Relayer V2)... Condition: {condition_id[:8]}")
             
-            # 1. Construct Data for redeemPositions
-            func_selector = bytes.fromhex("8679b734") # redeemPositions
-            parent_id = bytes.fromhex("0000000000000000000000000000000000000000000000000000000000000000")
-            cond_id_bytes = bytes.fromhex(condition_id.replace("0x", ""))
-            index_sets = [1, 2] # Yes and No
-
-            tx_data = func_selector + encode(
-                ['address', 'bytes32', 'bytes32', 'uint256[]'],
-                [USDC_ADDRESS, parent_id, cond_id_bytes, index_sets]
-            )
+            # Import and use Relayer V2 Client
+            from relayer_v2_client import RelayerV2Client
             
-            # 2. Get Nonce
-            nonce = self._get_safe_nonce()
-            if nonce is None:
-                logger.error("❌ 无法获取 Nonce，跳过赎回")
-                return
-
-            logger.info(f"✅ Nonce: {nonce}. 正在签名...")
+            client = RelayerV2Client()
+            result = client.redeem_positions(condition_id)
             
-            # 3. Sign
-            pk = os.getenv("PRIVATE_KEY")
-            signature = sign_safe_tx(
-                safe_address=FUNDER_ADDRESS,
-                to=CTF_EXCHANGE,
-                value=0,
-                data=tx_data,
-                operation=0,
-                safe_tx_gas=0,
-                base_gas=0,
-                gas_price=0,
-                gas_token="0x0000000000000000000000000000000000000000",
-                refund_receiver="0x0000000000000000000000000000000000000000",
-                nonce=nonce,
-                private_key=pk
-            )
-            
-            # 4. Post to Relayer
-            payload = {
-                "safe": FUNDER_ADDRESS,
-                "to": CTF_EXCHANGE,
-                "value": "0",
-                "data": "0x" + tx_data.hex(),
-                "operation": 0,
-                "safeTxGas": 0,
-                "baseGas": 0,
-                "gasPrice": 0,
-                "gasToken": "0x0000000000000000000000000000000000000000",
-                "refundReceiver": "0x0000000000000000000000000000000000000000",
-                "nonce": nonce,
-                "signature": "0x" + signature.hex()
-            }
-            
-            resp = requests.post(RELAYER_URL, json=payload, headers={"Content-Type": "application/json"})
-            if resp.status_code == 200 or resp.status_code == 201:
-                logger.info(f"🎉 自动赎回成功! TX Hash: {resp.text}")
+            if result["success"]:
+                tx_id = result.get("transaction_id", "N/A")
+                tx_hash = result.get("transaction_hash", "N/A")
+                logger.info(f"🎉 自动赎回提交成功! TX ID: {tx_id}")
+                self._notify_user(f"💰 自动赎回提交成功!\nTX ID: {tx_id[:20]}...\nHash: {tx_hash[:20]}...")
             else:
-                logger.error(f"❌ Relayer 拒绝: {resp.status_code} - {resp.text}")
+                error_msg = result.get("error", "Unknown error")
+                logger.error(f"❌ Relayer V2 失败: {error_msg}")
+                
+                # Fallback to manual notification
+                self._notify_user(f"⚠️ 自动赎回失败\n错误: {error_msg[:50]}...\n请手动赎回:\nhttps://polymarket.com/portfolio")
             
         except Exception as e:
-            logger.error(f"❌ 赎回出错: {e}")
+            logger.error(f"❌ 赎回过程异常: {e}")
+            self._notify_user(f"❌ 赎回异常: {str(e)[:100]}\n请手动赎回")
+            self._notify_user(f"⚠️ 自动赎回失败，请手动赎回:\nhttps://polymarket.com/market/{condition_id}")
+    
+    def _redeem_direct(self, condition_id, cond_id_bytes, parent_id, index_sets):
+        """Direct CTF contract interaction (fallback when relayer fails)"""
+        try:
+            from web3 import Web3
+            
+            # Connect to Polygon
+            w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com", request_kwargs={'timeout': 10}))
+            if not w3.is_connected():
+                logger.error("❌ 无法连接到 Polygon RPC")
+                return
+            
+            # Get signing account
+            pk = os.getenv("PRIVATE_KEY") or os.getenv("PK")
+            if not pk:
+                logger.error("❌ 缺少私钥，无法直接赎回")
+                return
+                
+            account = Account.from_key(pk)
+            
+            # Check MATIC balance
+            balance = w3.eth.get_balance(account.address)
+            if balance < w3.to_wei(0.01, 'ether'):
+                logger.error(f"❌ MATIC 余额不足: {w3.from_wei(balance, 'ether'):.4f} MATIC")
+                self._notify_user(f"⚠️ 自动赎回失败 - 余额不足\n请手动赎回:\nhttps://polymarket.com/market/{condition_id}")
+                return
+            
+            logger.info(f"💰 使用直接合约交互赎回，账户: {account.address[:10]}...")
+            
+            # CTF Exchange ABI (redeemPositions function)
+            abi = [
+                {
+                    "inputs": [
+                        {"name": "collateralToken", "type": "address"},
+                        {"name": "parentCollectionId", "type": "bytes32"},
+                        {"name": "conditionId", "type": "bytes32"},
+                        {"name": "indexSets", "type": "uint256[]"}
+                    ],
+                    "name": "redeemPositions",
+                    "outputs": [],
+                    "stateMutability": "nonpayable",
+                    "type": "function"
+                }
+            ]
+            
+            # Initialize contract
+            ctf_contract = w3.eth.contract(
+                address=Web3.to_checksum_address(CTF_EXCHANGE),
+                abi=abi
+            )
+            
+            # Build transaction
+            tx = ctf_contract.functions.redeemPositions(
+                USDC_ADDRESS,
+                parent_id,
+                cond_id_bytes,
+                index_sets
+            ).build_transaction({
+                'from': account.address,
+                'nonce': w3.eth.get_transaction_count(account.address),
+                'gas': 300000,
+                'gasPrice': w3.eth.gas_price,
+                'chainId': 137
+            })
+            
+            # Sign and send
+            signed_tx = w3.eth.account.sign_transaction(tx, pk)
+            tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            
+            logger.info(f"⏳ 直接赎回交易已发送: {tx_hash.hex()[:20]}...")
+            
+            # Wait for receipt
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            
+            if receipt['status'] == 1:
+                logger.info(f"🎉 直接赎回成功! TX Hash: {tx_hash.hex()}")
+                self._notify_user(f"💰 赎回成功 (直接)!\nTX: {tx_hash.hex()[:30]}...\nGas Used: {receipt['gasUsed']}")
+            else:
+                logger.error(f"❌ 直接赎回交易失败")
+                self._notify_user(f"⚠️ 赎回失败 - 请手动赎回:\nhttps://polymarket.com/market/{condition_id}")
+                
+        except Exception as e:
+            logger.error(f"❌ 直接赎回失败: {e}")
+            self._notify_user(f"⚠️ 自动赎回失败，请手动赎回:\nhttps://polymarket.com/market/{condition_id}")
 
     async def settle_positions(self, market, final_price):
         """Settle open positions (Works for both Live and Paper)"""
@@ -1032,6 +1136,8 @@ class PolymarketBotV3:
                 self._raw_redeem(market.condition_id)
             except Exception as e:
                 logger.error(f"赎回失败: {e}")
+                # Notify user about manual redemption option
+                self._notify_user(f"⚠️ 自动赎回失败，请手动赎回:\nhttps://polymarket.com/market/{market.condition_id}")
         
         # Iterate remaining positions for this market
         for p in list(self.positions):
@@ -1066,88 +1172,87 @@ class PolymarketBotV3:
             })
             
             self.positions.remove(p)
+        
+        self._save_positions()  # [P1-Fix] 结算后保存持仓
 
-    async def check_take_profit(self, market: Market15m):
-        """Monitor for 15% Profit -> Place Limit Sell (Works for both Live and Paper)"""
-        for p in list(self.positions):
-            if p["market_slug"] != market.slug: continue
-            if p.get("tp_placed", False): continue # Already handling
-            if p.get("status") != "OPEN": continue  # Skip closed positions
-
-            # TP Threshold
-            tp_price = p["entry_price"] * 1.15
-            if tp_price >= 0.99: tp_price = 0.99
-            
-            # Current Best Bid (what we can sell at)
-            current_bid = market.book_up.best_bid if p["direction"] == "UP" else market.book_down.best_bid
-            
-            if current_bid >= tp_price:
-                # Calculate actual PnL
-                entry = p["entry_price"]
-                pnl_pct = (current_bid - entry) / entry
-                
-                logger.info(f"💰 止盈触发! {p['direction']} @ {current_bid:.2f} (Entry: {entry:.2f}, PnL: {pnl_pct:.1%})")
-                self._notify_user(f"💰 止盈离场: {p['direction']}\n💸 价格: {current_bid:.2f} (+{pnl_pct*100:.0f}%)")
-                
-                # Update position status
-                p["status"] = "TP_HIT"
-                p["exit_price"] = current_bid
-                p["exit_time"] = datetime.now(timezone.utc).isoformat()
-                p["pnl"] = pnl_pct
-                p["tp_placed"] = True
-                
-                # Remove from active positions
-                self.positions.remove(p)
-                
-                # Log to file
-                self.trade_logger.log({
-                    "time": datetime.now(timezone.utc).isoformat(),
-                    "type": "TAKE_PROFIT_PAPER" if self.paper_trade else "TAKE_PROFIT",
-                    "market": market.slug,
-                    "direction": p["direction"],
-                    "entry_price": entry,
-                    "exit_price": current_bid,
-                    "pnl": pnl_pct,
-                    "mode": "PAPER" if self.paper_trade else "LIVE"
-                })
-
-    async def check_stop_loss(self, market: Market15m):
-        """Check if any position needs to be stopped out (Works for both Live and Paper)"""
+    async def check_exit_conditions(self, market: Market15m):
+        """[P1-Fix] 统一处理止盈止损，避免竞争条件"""
         for p in list(self.positions):
             if p["market_slug"] != market.slug: continue
             if p.get("status") != "OPEN": continue  # Skip closed positions
+            if p.get("exit_checked", False): continue  # [P1-Fix] 已检查过，防止重复
             
-            # Current Best Bid (what we can sell at)
-            current_bid = market.book_up.best_bid if p["direction"] == "UP" else market.book_down.best_bid
+            # [CRITICAL-Fix] 使用真实可成交价格，不是中间价！
+            # 止盈/止损检查必须基于实际能卖出的价格 (best_bid)
+            if p["direction"] == "UP":
+                # 持有 UP，用 book_up 的价格
+                current_bid = market.book_up.best_bid  # 能卖出的价格
+                current_ask = market.book_up.best_ask  # 买入价格（用于止损计算）
+            else:
+                # 持有 DOWN，用 book_down 的价格  
+                current_bid = market.book_down.best_bid  # 能卖出的价格
+                current_ask = market.book_down.best_ask  # 买入价格
+            
+            if current_bid <= 0: continue  # 无流动性
+            
             entry_price = p["entry_price"]
-            
-            if current_bid <= 0: continue # No liquidity
-            
-            # PnL calculation
+            # [CRITICAL-Fix] 用实际可成交的 best_bid 计算盈亏
             pnl_pct = (current_bid - entry_price) / entry_price
+            exit_price = round(current_bid, 2)
             
+            # [DEBUG] 每10秒记录一次价格检查
+            if int(time.time()) % 10 == 0:
+                logger.info(f"[DEBUG] 持仓检查: {p['direction']} entry={entry_price:.2f} current_bid={current_bid:.2f} pnl={pnl_pct:.1%}")
+            
+            # [P1-Fix] 优先检查止损（风险控制优先）
             if pnl_pct < -self.stop_loss_pct:
-                logger.warning(f"🛑 止损触发! {p['direction']} @ {current_bid:.2f} (Entry: {entry_price:.2f}, PnL: {pnl_pct:.1%})")
-                self._notify_user(f"🛑 止损离场: {p['direction']}\n📉 触发价: {current_bid:.2f}\n💸 PnL: {pnl_pct:.1%}")
-                
-                # Update position status
                 p["status"] = "SL_HIT"
-                p["exit_price"] = current_bid
+                p["exit_price"] = exit_price
                 p["exit_time"] = datetime.now(timezone.utc).isoformat()
                 p["pnl"] = pnl_pct
-                p["sl_placed"] = True
-                
-                # Remove from active positions
+                p["exit_checked"] = True  # [P1-Fix] 标记已处理
                 self.positions.remove(p)
+                self._save_positions()  # [P1-Fix] 保存持仓变更
                 
-                # Log to file
+                logger.warning(f"🛑 止损触发! {p['direction']} @ {exit_price:.2f} (Entry: {entry_price:.2f}, PnL: {pnl_pct:.1%})")
+                self._notify_user(f"🛑 止损离场: {p['direction']}\n📉 触发价: {exit_price:.2f}\n💸 PnL: {pnl_pct:.1%}")
+                
                 self.trade_logger.log({
                     "time": datetime.now(timezone.utc).isoformat(),
                     "type": "STOP_LOSS_PAPER" if self.paper_trade else "STOP_LOSS",
                     "market": market.slug,
                     "direction": p["direction"],
                     "entry_price": entry_price,
-                    "exit_price": current_bid,
+                    "exit_price": exit_price,
+                    "pnl": pnl_pct,
+                    "mode": "PAPER" if self.paper_trade else "LIVE"
+                })
+                continue  # [P1-Fix] 已处理，跳过止盈检查
+            
+            # [P1-Fix] 再检查止盈
+            tp_price = entry_price * 1.15
+            if tp_price >= 0.99: tp_price = 0.99
+            
+            # [CRITICAL-Fix] 止盈也必须基于可成交价格 current_bid
+            if current_bid >= tp_price:
+                p["status"] = "TP_HIT"
+                p["exit_price"] = exit_price
+                p["exit_time"] = datetime.now(timezone.utc).isoformat()
+                p["pnl"] = pnl_pct
+                p["exit_checked"] = True  # [P1-Fix] 标记已处理
+                self.positions.remove(p)
+                self._save_positions()  # [P1-Fix] 保存持仓变更
+                
+                logger.info(f"💰 止盈触发! {p['direction']} @ {exit_price:.2f} (Entry: {entry_price:.2f}, PnL: {pnl_pct:.1%})")
+                self._notify_user(f"💰 止盈离场: {p['direction']}\n💸 价格: {exit_price:.2f} (+{pnl_pct*100:.0f}%)")
+                
+                self.trade_logger.log({
+                    "time": datetime.now(timezone.utc).isoformat(),
+                    "type": "TAKE_PROFIT_PAPER" if self.paper_trade else "TAKE_PROFIT",
+                    "market": market.slug,
+                    "direction": p["direction"],
+                    "entry_price": entry_price,
+                    "exit_price": exit_price,
                     "pnl": pnl_pct,
                     "mode": "PAPER" if self.paper_trade else "LIVE"
                 })
@@ -1200,24 +1305,36 @@ class PolymarketBotV3:
         if self.paper_trade:
             # 模拟交易逻辑 - 完整复刻实盘流程
             try:
-                shares = 1.0 / price
+                # [CRITICAL-Fix] 开仓价格必须与止盈检查一致！
+                # 用实际能成交的价格，不是中间价
+                if direction == "UP":
+                    # 买 UP，用 best_ask (卖一价)
+                    fill_price = market.book_up.best_ask if market.book_up.best_ask > 0 else price
+                else:
+                    # 买 DOWN，用 best_ask (卖一价)
+                    fill_price = market.book_down.best_ask if market.book_down.best_ask > 0 else price
                 
-                # 记录模拟持仓 (复刻实盘的 positions 逻辑)
+                fill_price = round(min(0.99, max(0.01, fill_price)), 2)
+                
+                # [P1-Fix] 防止除以零
+                if fill_price <= 0:
+                    logger.error(f"❌ 无效价格: {fill_price}, 跳过开仓")
+                    return
+                shares = 1.0 / fill_price
+                
+                # [Fix] 持仓和日志使用统一的 fill_price
                 position = {
                     "market_slug": market.slug,
                     "direction": direction,
-                    "entry_price": price,
+                    "entry_price": fill_price,  # [Fix] 使用撮合价，不是 price
                     "size": size,
                     "shares": shares,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "tp_placed": False,  # 标记是否已挂止盈单
-                    "sl_placed": False,  # 标记是否已挂止损单
-                    "status": "OPEN"     # OPEN / TP_HIT / SL_HIT / SETTLED
+                    "tp_placed": False,
+                    "sl_placed": False,
+                    "status": "OPEN"
                 }
                 self.positions.append(position)
-                
-                # 模拟挂单 - 假设立即成交 (Maker 策略)
-                fill_price = price  # 实际可能略有滑点
                 
                 # 记录交易日志
                 trade_record = {
@@ -1237,6 +1354,12 @@ class PolymarketBotV3:
                 tp_price = min(0.99, fill_price * 1.15)  # +15% 止盈
                 sl_price = fill_price * (1 - self.stop_loss_pct)  # -35% 止损
                 
+                # [DEBUG] 记录详细价格信息用于排查
+                if direction == "UP":
+                    logger.info(f"[DEBUG] UP价格 - bid: {market.book_up.best_bid}, ask: {market.book_up.best_ask}")
+                else:
+                    logger.info(f"[DEBUG] DOWN价格 - bid: {market.book_down.best_bid}, ask: {market.book_down.best_ask}")
+                
                 logger.info(f"📊 [模拟] 开仓成功: {direction} {shares:.2f}份 @ {fill_price:.2f}")
                 logger.info(f"📊 [模拟] 已挂止盈: {tp_price:.2f} | 止损: {sl_price:.2f}")
                 
@@ -1253,41 +1376,85 @@ class PolymarketBotV3:
                 logger.error(f"[模拟交易] 开仓失败: {e}")
                 self._notify_user(f"❌ [模拟] 开仓失败: {e}")
         else:
-             # Real Execution
+             # [CRITICAL] 实盘双重确认检查
+             if not getattr(self, 'live_trading_enabled', False):
+                 logger.error("🚨 [安全拦截] 尝试执行实盘但 live_trading_enabled=false")
+                 logger.error("🚨 如需实盘，请修改 config.json: paper_trade=false + live_trading_enabled=true")
+                 self._notify_user(f"🚨 安全拦截: 实盘未启用\n当前模式: 模拟交易\n如需实盘请修改配置并重启")
+                 return
+             
+             # Real Execution (双重确认通过)
+             logger.warning("🔥 [实盘模式] 立即执行真实下单！")
              try:
                  if self.clob_client:
                      shares = 1.0 / price
+                     
+                     # [NOTIFY] 实时通知（无延迟）
+                     self._notify_user(f"🚀 实盘执行: {direction} {shares:.2f}份 @ ${price:.2f}")
+                     
                      order_args = OrderArgs(
                          price=price,
                          size=shares,
                          side=BUY,
                          token_id=market.token_id_up if direction == "UP" else market.token_id_down,
-                         order_type=OrderType.LIMIT # Explicit Limit
+                         order_type=OrderType.LIMIT
                      )
-                     # await self.clob_client.create_order(order_args)
-                     pass
-                 
-                 self._notify_user(f"✅ 实盘挂单成功 (模拟): {direction} {shares:.2f}份 @ {price}")
+                     
+                     # [P0-Fix] 实盘立即下单 + 订单跟踪
+                     logger.info(f"🚀 执行实盘下单: {direction} @ {price:.2f}")
+                     try:
+                         order_result = await self.clob_client.create_order(order_args)
+                         order_id = order_result.get("order_id") if order_result else None
+                         
+                         if order_id:
+                             logger.info(f"✅ 订单提交成功: {order_id}")
+                             self._notify_user(f"✅ 实盘已提交: {direction} {shares:.2f}份 @ ${price:.2f}\n订单ID: {order_id[:16]}...")
+                             
+                             # [P0-Fix] 更新持仓记录订单ID
+                             position["order_id"] = order_id
+                             position["status"] = "PENDING"  # 等待成交
+                             
+                             # [P0-Fix] 异步跟踪订单状态
+                             asyncio.create_task(self._track_order(order_id, position))
+                         else:
+                             logger.error("❌ 订单提交失败: 无订单ID返回")
+                             self._notify_user("❌ 订单提交失败")
+                             return
+                     except Exception as e:
+                         logger.error(f"❌ 下单异常: {e}")
+                         self._notify_user(f"❌ 下单失败: {str(e)[:100]}")
+                         return
+                 else:
+                     logger.error("❌ CLOB Client 未初始化，无法实盘")
+                     self._notify_user("❌ 实盘失败: CLOB Client 未连接")
              except Exception as e:
                  self._notify_user(f"❌ 下单失败: {e}")
              
-             # Record Position
-             self.positions.append({
+             # Record Position [P2-Fix] 添加 shares 和 order_id
+             position = {
                  "market_slug": market.slug,
                  "direction": direction,
                  "entry_price": price,
+                 "shares": shares,  # [P2-Fix] 记录份额
                  "size": size,
                  "timestamp": datetime.now(timezone.utc).isoformat(),
-                 "tp_placed": False # Track if TP order is active
-             })
+                 "tp_placed": False,
+                 "sl_placed": False,
+                 "status": "OPEN",
+                 "order_id": None,  # [P2-Fix] 订单ID占位
+                 "exit_checked": False
+             }
+             self.positions.append(position)
+             self._save_positions()  # [P1-Fix] 保存持仓
 
              trade_record = {
-                 "time": datetime.now().isoformat(),
+                 "time": datetime.now(timezone.utc).isoformat(),
                  "type": "V3_SMART",
                  "direction": direction,
                  "price": price,
+                 "shares": shares,  # [P2-Fix] 记录份额
                  "strike": market.strike_price,
-                 "fee": self.fee_pct # Record fee assumption
+                 "fee": self.fee_pct
              }
              
              # Log Liquidity Stats for ML Training
@@ -1302,6 +1469,56 @@ class PolymarketBotV3:
              self._notify_user(f"🔥 开仓: {direction} @ ${price:.2f}\n🎯 Strike: ${market.strike_price}\n💰 预计投入: $1.0")
 
              await asyncio.sleep(10) # Cooldown
+
+    async def _track_order(self, order_id: str, position: dict):
+        """[P0-Fix] 跟踪订单成交状态"""
+        max_wait = 60  # 最多等待60秒
+        check_interval = 2  # 每2秒检查一次
+        
+        for i in range(0, max_wait, check_interval):
+            try:
+                # 查询订单状态
+                order_status = await self.clob_client.get_order(order_id)
+                
+                if order_status:
+                    status = order_status.get("status")
+                    
+                    if status == "FILLED":
+                        # 订单已成交
+                        avg_price = float(order_status.get("avg_price", position["entry_price"]))
+                        filled_size = float(order_status.get("size", position["shares"]))
+                        
+                        position["status"] = "OPEN"
+                        position["entry_price"] = avg_price  # 更新为实际成交价
+                        position["shares"] = filled_size
+                        self._save_positions()
+                        
+                        logger.info(f"✅ 订单 {order_id[:8]}... 已成交: {avg_price:.2f} x {filled_size:.4f}")
+                        self._notify_user(f"✅ 订单成交\n价格: ${avg_price:.2f}\n份额: {filled_size:.4f}")
+                        return
+                        
+                    elif status in ["CANCELLED", "REJECTED"]:
+                        # 订单被取消或拒绝
+                        position["status"] = "CANCELLED"
+                        self.positions.remove(position)
+                        self._save_positions()
+                        
+                        logger.warning(f"⚠️ 订单 {order_id[:8]}... {status}")
+                        self._notify_user(f"⚠️ 订单{status}: {order_id[:16]}...")
+                        return
+                        
+                    # 其他状态: OPEN, PENDING - 继续等待
+                    if i % 10 == 0:  # 每10秒报告一次
+                        logger.info(f"⏳ 订单 {order_id[:8]}... 状态: {status}, 等待成交...")
+                        
+            except Exception as e:
+                logger.error(f"查询订单状态失败: {e}")
+            
+            await asyncio.sleep(check_interval)
+        
+        # 超时处理
+        logger.warning(f"⏰ 订单 {order_id[:8]}... 跟踪超时，请手动检查")
+        self._notify_user(f"⏰ 订单跟踪超时\n订单ID: {order_id[:16]}...\n请检查 Polymarket 账户")
 
 # --- Reusing WebSocket Manager from V2 for compactness ---
 class WebSocketManagerV3:
@@ -1332,8 +1549,13 @@ class WebSocketManagerV3:
         elif data.get("event_type") == "price_change":
             for p in data.get("price_changes", []):
                 aid = p.get("asset_id")
-                if aid == self.market.token_id_up: self.market.book_up.best_ask = float(p.get("best_ask") or 1)
-                elif aid == self.market.token_id_down: self.market.book_down.best_ask = float(p.get("best_ask") or 1)
+                # [Fix] 同时更新 best_bid 和 best_ask
+                if aid == self.market.token_id_up:
+                    self.market.book_up.best_bid = float(p.get("best_bid") or 0)
+                    self.market.book_up.best_ask = float(p.get("best_ask") or 1)
+                elif aid == self.market.token_id_down:
+                    self.market.book_down.best_bid = float(p.get("best_bid") or 0)
+                    self.market.book_down.best_ask = float(p.get("best_ask") or 1)
     async def close(self):
         self.running = False
         if self.ws: await self.ws.close()

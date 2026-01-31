@@ -1,0 +1,85 @@
+{
+  "history": [
+    {
+      "model_id": "kimi-code/kimi-for-coding",
+      "provider": "kimi-code",
+      "emoji": "\ud83c\udfaf",
+      "task_type": "coding",
+      "confidence": 1.0,
+      "reason": "task_type=coding, confidence=1.00",
+      "estimated_cost": 0.003015,
+      "context_window": 262144,
+      "all_task_scores": {
+        "coding": 1.0,
+        "research": 0.0,
+        "creative": 0.0,
+        "social": 0.0,
+        "critical": 0.0,
+        "data": 0.0,
+        "chat": 0
+      },
+      "timestamp": 1769864612.4099176
+    },
+    {
+      "model_id": "google/gemini-3-pro-preview",
+      "provider": "google",
+      "emoji": "\ud83e\udde0",
+      "task_type": "creative",
+      "confidence": 0.5,
+      "reason": "task_type=creative, confidence=0.50",
+      "estimated_cost": 0.000753,
+      "context_window": 1048576,
+      "all_task_scores": {
+        "coding": 0.0,
+        "research": 0.0,
+        "creative": 0.5,
+        "social": 0.5,
+        "critical": 0.0,
+        "data": 0.0,
+        "chat": 0.15
+      },
+      "timestamp": 1769864612.410234
+    },
+    {
+      "model_id": "google-antigravity/claude-opus-4-5-thinking",
+      "provider": "google-antigravity",
+      "emoji": "\ud83d\udd2e",
+      "task_type": "research",
+      "confidence": 0.5,
+      "reason": "task_type=research, confidence=0.50",
+      "estimated_cost": 0.037575,
+      "context_window": 200000,
+      "all_task_scores": {
+        "coding": 0.0,
+        "research": 0.5,
+        "creative": 0.0,
+        "social": 0.0,
+        "critical": 0.0,
+        "data": 0.0,
+        "chat": 0.15
+      },
+      "timestamp": 1769864612.4105487
+    },
+    {
+      "model_id": "google/gemini-3-flash-preview",
+      "provider": "google",
+      "emoji": "\u26a1",
+      "task_type": "chat",
+      "confidence": 0.3,
+      "reason": "task_type=chat, confidence=0.30",
+      "estimated_cost": 0.00020040000000000002,
+      "context_window": 1048576,
+      "all_task_scores": {
+        "coding": 0.0,
+        "research": 0.0,
+        "creative": 0.0,
+        "social": 0.0,
+        "critical": 0.0,
+        "data": 0.0,
+        "chat": 0.3
+      },
+      "timestamp": 1769864612.4117854
+    }
+  ],
+  "last_updated": 1769864612.4126976
+}
