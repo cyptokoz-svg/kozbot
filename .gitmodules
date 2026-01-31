@@ -1,0 +1,6 @@
+[submodule "bots/polymarket"]
+	path = bots/polymarket
+	url = https://github.com/cyptokoz-svg/kozbot-polymarket.git
+[submodule "bots/hyperliquid"]
+	path = bots/hyperliquid
+	url = https://github.com/cyptokoz-svg/kozbot-hyperliquid.git
