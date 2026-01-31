@@ -4,6 +4,8 @@ config.json
 
 # Cache
 candle_cache/
+__pycache__/
+*.pyc
 *.pkl
 
 # Logs
@@ -11,3 +13,7 @@ candle_cache/
 
 # Virtual env
 venv/
+
+# Runtime data
+paper_trades.jsonl
+positions.json
