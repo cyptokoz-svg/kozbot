@@ -1,3 +1,11 @@
+# ⚠️ DEPRECATED - See bots/polymarket/
+
+**Active bot location:** `/home/ubuntu/clawd/bots/polymarket/`
+
+This folder is a stale copy kept for reference. Do not run from here.
+
+---
+
 # Polymarket BTC 15m AI Trading Bot
 
 An autonomous quant trading system for Polymarket's BTC 15-minute options markets.

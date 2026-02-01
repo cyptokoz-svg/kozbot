@@ -1,3 +1,5 @@
+# DEPRECATED: Bot runs from /home/ubuntu/clawd/bots/polymarket/
+# This file kept for reference only
 [Unit]
 Description=Polymarket BTC 15m Trading Bot
 After=network.target
@@ -5,8 +7,8 @@ After=network.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/clawd/polymarket-bot
-ExecStart=/home/ubuntu/clawd/polymarket-bot/venv/bin/python btc_15m_bot_v3.py
+WorkingDirectory=/home/ubuntu/clawd/bots/polymarket
+ExecStart=/home/ubuntu/clawd/bots/polymarket/venv/bin/python btc_15m_bot_v3.py
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
